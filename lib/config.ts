@@ -20,30 +20,23 @@ export const DEFAULT_FILTER_CONFIG: FilterConfig = {
  */
 export const SOURCES_CONFIG: SourceConfig[] = [
   {
+    id: 'rsks-nanyang',
+    name: '南阳人事考试网招聘公告 (知仕阁公考)',
+    type: 'html',
+    url: 'https://www.rsks.cn/henan/nanyang/',
+    selector: {
+      container: '.list-content .list-item',
+      title: 'a.list-title',
+      link: 'a.list-title',
+      date: '.list-date',
+    },
+  },
+  {
     id: 'wx-official-rss',
     name: '微信公众号「名企校招推送」',
     type: 'rss',
     // 微信公众号转成的 RSS 源（例如通过 RSSHub 或 WeRss 生成的链接）
     url: 'https://rsshub.app/wechat/officialaccounts/cntvnews', // 示例 RSS 链接，可换成你的公众号 RSS
-  },
-  {
-    id: 'campus-job-rss',
-    name: '某大学就业网 RSS 招聘列表',
-    type: 'rss',
-    url: 'https://news.ycombinator.com/rss', // 示例 RSS 地址
-  },
-  {
-    id: 'university-job-site',
-    name: 'XX大学就业网招聘列表 (HTML网页爬取)',
-    type: 'html',
-    url: 'https://example.edu.cn/job/list', // 示例网页地址
-    selector: {
-      container: '.job-list .item',  // 列表每一项的 CSS 选择器
-      title: '.title a',             // 标题选择器
-      link: '.title a',              // 链接选择器
-      date: '.date',                 // 日期选择器 (可选)
-      summary: '.desc',              // 摘要选择器 (可选)
-    },
   },
 ];
 
