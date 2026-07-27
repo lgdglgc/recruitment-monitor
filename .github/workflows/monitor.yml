@@ -1,0 +1,41 @@
+name: Recruitment Monitor High-Frequency Scheduler
+
+on:
+  schedule:
+    # 每 30 分钟触发一次 (UTC 时间)
+    - cron: '*/30 * * * *'
+  # 支持在 GitHub Actions 页面手动点击触发运行
+  workflow_dispatch:
+
+jobs:
+  trigger-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Recruitment Scraper API
+        env:
+          TARGET_URL: ${{ secrets.VERCEL_PROJECT_URL }} # 部署在 Vercel 上的完整域名，例如 https://my-job-monitor.vercel.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}        # 在 GitHub Repository Secrets 中配置的密钥
+        run: |
+          if [ -z "$TARGET_URL" ]; then
+            echo "Error: VERCEL_PROJECT_URL Secret is not configured."
+            exit 1
+          fi
+          
+          echo "Triggering API endpoint: ${TARGET_URL}/api/cron"
+          
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${TARGET_URL}/api/cron")
+          
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | awk -F: '{print $2}')
+          BODY=$(echo "$RESPONSE" | sed '/HTTP_STATUS/d')
+          
+          echo "Response Body: $BODY"
+          echo "HTTP Status Code: $HTTP_STATUS"
+          
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "Failed to run monitoring job! HTTP Status: $HTTP_STATUS"
+            exit 1
+          fi
+          
+          echo "Monitoring job triggered successfully!"
