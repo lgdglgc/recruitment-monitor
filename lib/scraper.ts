@@ -4,7 +4,7 @@ import { RSSAdapter } from './adapters/rss';
 import { getFilterConfig, getSourcesConfig } from './dynamic-config';
 import { filterJobs } from './filter';
 import { sendServerChanNotification } from './notify';
-import { filterNewItems, markItemsAsProcessed } from './redis';
+import { filterNewItems, markItemsAsProcessed, saveRecentJobs } from './redis';
 import { JobItem, ScrapeResult, SourceConfig } from './types';
 
 /**
@@ -92,6 +92,11 @@ export async function runMonitoringWorkflow(): Promise<{
   console.log(
     `[Scraper Summary] 抓取完成。数据源: ${sourcesConfig.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
   );
+
+  // 1.5 保存所有匹配到的岗位到 Redis 持久化展示缓存 (供前端界面浏览)
+  if (allMatchedItems.length > 0) {
+    await saveRecentJobs(allMatchedItems);
+  }
 
   // 2. Redis 去重：挑选出从未推送过的全新岗位
   const newUnsentItems = await filterNewItems(allMatchedItems);

@@ -102,3 +102,71 @@ export async function markItemsAsProcessed(items: JobItem[]): Promise<void> {
     inMemorySeenSet.add(item.id);
   }
 }
+
+/**
+ * Redis 最近岗位存储 Key 与最大保留条数
+ */
+const RECENT_JOBS_KEY = 'jobs:recent';
+const MAX_RECENT_JOBS = 200;
+let inMemoryRecentJobs: JobItem[] = [];
+
+/**
+ * 保存/合并最新抓取到的岗位列表 (保留最近 200 条)
+ */
+export async function saveRecentJobs(items: JobItem[]): Promise<void> {
+  if (!items || items.length === 0) return;
+
+  if (redisClient) {
+    try {
+      const existing = (await redisClient.get<JobItem[]>(RECENT_JOBS_KEY)) || [];
+      const map = new Map<string, JobItem>();
+
+      // 最新抓取的条目排在前面
+      for (const item of items) {
+        if (item.id) map.set(item.id, item);
+      }
+      for (const item of existing) {
+        if (item.id && !map.has(item.id)) {
+          map.set(item.id, item);
+        }
+      }
+
+      const merged = Array.from(map.values()).slice(0, MAX_RECENT_JOBS);
+      await redisClient.set(RECENT_JOBS_KEY, merged);
+      inMemoryRecentJobs = merged;
+      return;
+    } catch (error) {
+      console.error('[Redis Error] 保存最新岗位列表失败:', error);
+    }
+  }
+
+  // 内存降级保存
+  const map = new Map<string, JobItem>();
+  for (const item of items) {
+    if (item.id) map.set(item.id, item);
+  }
+  for (const item of inMemoryRecentJobs) {
+    if (item.id && !map.has(item.id)) {
+      map.set(item.id, item);
+    }
+  }
+  inMemoryRecentJobs = Array.from(map.values()).slice(0, MAX_RECENT_JOBS);
+}
+
+/**
+ * 获取最新抓取的岗位列表
+ */
+export async function getRecentJobs(): Promise<JobItem[]> {
+  if (redisClient) {
+    try {
+      const data = await redisClient.get<JobItem[]>(RECENT_JOBS_KEY);
+      if (data && Array.isArray(data)) {
+        return data;
+      }
+    } catch (error) {
+      console.error('[Redis Error] 读取最新岗位列表失败:', error);
+    }
+  }
+  return inMemoryRecentJobs;
+}
+

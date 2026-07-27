@@ -4,13 +4,19 @@ import { FilterConfig, JobItem, SourceConfig } from '@/lib/types';
 import { useEffect, useState } from 'react';
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<'sources' | 'filter' | 'tester'>('sources');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'sources' | 'filter' | 'tester'>('jobs');
   const [sources, setSources] = useState<SourceConfig[]>([]);
   const [filter, setFilter] = useState<FilterConfig>({
     years: ['2026', '2027'],
     keywords: ['校招', '春招', '秋招', '应届', '招聘', '岗位', '实习'],
     mode: 'AND',
   });
+
+  // Recent jobs state
+  const [recentJobs, setRecentJobs] = useState<JobItem[]>([]);
+  const [jobsLoading, setJobsLoading] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('');
 
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -79,8 +85,25 @@ export default function Dashboard() {
     }
   };
 
+  // Fetch recent saved jobs
+  const fetchRecentJobs = async () => {
+    setJobsLoading(true);
+    try {
+      const res = await fetch('/api/jobs');
+      const data = await res.json();
+      if (data.success) {
+        setRecentJobs(data.jobs || []);
+      }
+    } catch (err) {
+      console.error('获取最新岗位失败', err);
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
+    fetchRecentJobs();
   }, []);
 
   // Save configs to backend
@@ -156,7 +179,6 @@ export default function Dashboard() {
     const newItems: SourceConfig[] = [];
 
     lines.forEach((line, idx) => {
-      // 尝试是否为 JSON
       if (line.startsWith('{')) {
         try {
           const obj = JSON.parse(line);
@@ -233,6 +255,7 @@ export default function Dashboard() {
       setFullWorkflowResult(data);
       if (data.success) {
         showToast(`✅ 抓取与推送测试完成！新增推送 ${data.summary?.newPushedCount || 0} 条。`);
+        await fetchRecentJobs();
       } else {
         showToast(`❌ 执行中断: ${data.message || data.error}`);
       }
@@ -264,24 +287,36 @@ export default function Dashboard() {
     });
   };
 
+  // Filter jobs for Jobs Tab
+  const filteredJobs = recentJobs.filter((job) => {
+    const matchQuery =
+      !searchQuery.trim() ||
+      job.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+      (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+    const matchSource = !selectedSourceFilter || job.sourceName === selectedSourceFilter;
+    return matchQuery && matchSource;
+  });
+
   return (
     <div>
       {/* Toast */}
       {toastMessage && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          background: '#334155',
-          color: '#fff',
-          padding: '0.75rem 1.25rem',
-          borderRadius: '0.5rem',
-          boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)',
-          zIndex: 999,
-          border: '1px solid #6366f1',
-          fontSize: '0.9rem',
-          fontWeight: 600
-        }}>
+        <div
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            background: '#334155',
+            color: '#fff',
+            padding: '0.75rem 1.25rem',
+            borderRadius: '0.5rem',
+            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)',
+            zIndex: 999,
+            border: '1px solid #6366f1',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+          }}
+        >
           {toastMessage}
         </div>
       )}
@@ -312,6 +347,12 @@ export default function Dashboard() {
         {/* Nav Tabs */}
         <nav className="tabs-nav">
           <button
+            className={`tab-btn ${activeTab === 'jobs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('jobs')}
+          >
+            📋 最新招聘大厅 ({recentJobs.length})
+          </button>
+          <button
             className={`tab-btn ${activeTab === 'sources' ? 'active' : ''}`}
             onClick={() => setActiveTab('sources')}
           >
@@ -330,6 +371,129 @@ export default function Dashboard() {
             🔍 全量抓取实时测试
           </button>
         </nav>
+
+        {/* TAB 0: Recent Jobs */}
+        {activeTab === 'jobs' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>📋 最新抓取招聘信息大厅</h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  查看并检索系统中已保存和抓取到的最新相关招聘岗位条目（最多保留最新 200 条）
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button className="btn btn-secondary" onClick={fetchRecentJobs} disabled={jobsLoading}>
+                  {jobsLoading ? '刷新中...' : '🔄 刷新岗位列表'}
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '240px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="🔍 搜索招聘标题、岗位关键词或摘要..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                </div>
+                <div style={{ width: '220px' }}>
+                  <select
+                    className="form-select"
+                    value={selectedSourceFilter}
+                    onChange={(e) => setSelectedSourceFilter(e.target.value)}
+                  >
+                    <option value="">全部监控数据源</option>
+                    {Array.from(new Set(recentJobs.map((j) => j.sourceName))).map((src) => (
+                      <option key={src} value={src}>
+                        {src}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Jobs List */}
+            {jobsLoading ? (
+              <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+                正在加载招聘岗位列表...
+              </div>
+            ) : filteredJobs.length === 0 ? (
+              <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
+                {recentJobs.length === 0 ? (
+                  <div>
+                    <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>
+                      尚无已抓取的历史招聘岗位记录。
+                    </p>
+                    <button className="btn btn-primary" onClick={handleRunFullWorkflow} disabled={fullWorkflowRunning}>
+                      🚀 立即触发全量抓取
+                    </button>
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-muted)' }}>没有找到匹配搜索条件的招聘岗位。</p>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {filteredJobs.map((item, idx) => (
+                  <div
+                    key={item.id || idx}
+                    className="card"
+                    style={{
+                      padding: '1.25rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.65rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                      <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          fontSize: '1.05rem',
+                          fontWeight: 700,
+                          color: '#60a5fa',
+                          lineHeight: '1.4',
+                        }}
+                      >
+                        {item.title}
+                      </a>
+                      <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
+                        {item.sourceName}
+                      </span>
+                    </div>
+
+                    {item.summary && (
+                      <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                        {item.summary}
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+                      <span>📅 发布时间: {item.date || '未知'}</span>
+                      <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '0.25rem 0.65rem' }}
+                      >
+                        👉 查看原文 ↗
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* TAB 1: Sources */}
         {activeTab === 'sources' && (
