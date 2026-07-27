@@ -327,7 +327,7 @@ export default function Dashboard() {
           <span>🎯</span>
           <span>招聘监控推送系统 (Recruitment Monitor)</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div className="navbar-right">
           <span className="status-badge">
             <span className="dot"></span>
             Upstash Redis 存储同步中
@@ -391,30 +391,26 @@ export default function Dashboard() {
 
             {/* Filter Bar */}
             <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: '240px' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="🔍 搜索招聘标题、岗位关键词或摘要..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-                <div style={{ width: '220px' }}>
-                  <select
-                    className="form-select"
-                    value={selectedSourceFilter}
-                    onChange={(e) => setSelectedSourceFilter(e.target.value)}
-                  >
-                    <option value="">全部监控数据源</option>
-                    {Array.from(new Set(recentJobs.map((j) => j.sourceName))).map((src) => (
-                      <option key={src} value={src}>
-                        {src}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="filter-bar-grid">
+                <input
+                  type="text"
+                  className="form-input filter-input"
+                  placeholder="🔍 搜索招聘标题、岗位关键词或摘要..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <select
+                  className="form-select filter-select"
+                  value={selectedSourceFilter}
+                  onChange={(e) => setSelectedSourceFilter(e.target.value)}
+                >
+                  <option value="">全部监控数据源</option>
+                  {Array.from(new Set(recentJobs.map((j) => j.sourceName))).map((src) => (
+                    <option key={src} value={src}>
+                      {src}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -652,7 +648,7 @@ export default function Dashboard() {
 
               {fullWorkflowResult && (
                 <div>
-                  <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', display: 'flex', gap: '2rem' }}>
+                  <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
                     <div>监控源总数: <strong>{fullWorkflowResult.summary?.totalSources}</strong></div>
                     <div>抓取总条目数: <strong>{fullWorkflowResult.summary?.totalFetched}</strong></div>
                     <div>符合关键词匹配数: <strong style={{ color: '#10b981' }}>{fullWorkflowResult.summary?.totalMatched}</strong></div>
@@ -663,26 +659,28 @@ export default function Dashboard() {
                   {fullWorkflowResult.results?.flatMap((r: any) => r.items).length === 0 ? (
                     <p style={{ color: 'var(--text-muted)' }}>没有找到符合当前关键词规则的招考招聘信息。</p>
                   ) : (
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>数据来源</th>
-                          <th>标题</th>
-                          <th>发布时间</th>
-                          <th>详情链接</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {fullWorkflowResult.results?.flatMap((r: any) => r.items).map((item: JobItem, idx: number) => (
-                          <tr key={idx}>
-                            <td><span className="type-tag type-rss">{item.sourceName}</span></td>
-                            <td><strong>{item.title}</strong></td>
-                            <td>{item.date || '-'}</td>
-                            <td><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>查看原文 ↗</a></td>
+                    <div className="table-responsive">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>数据来源</th>
+                            <th>标题</th>
+                            <th>发布时间</th>
+                            <th>详情链接</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {fullWorkflowResult.results?.flatMap((r: any) => r.items).map((item: JobItem, idx: number) => (
+                            <tr key={idx}>
+                              <td><span className="type-tag type-rss">{item.sourceName}</span></td>
+                              <td><strong>{item.title}</strong></td>
+                              <td>{item.date || '-'}</td>
+                              <td><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>查看原文 ↗</a></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               )}
