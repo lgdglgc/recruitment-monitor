@@ -1,7 +1,7 @@
 import { CustomExampleAdapter } from './adapters/custom-example';
 import { HTMLAdapter } from './adapters/html';
 import { RSSAdapter } from './adapters/rss';
-import { DEFAULT_FILTER_CONFIG, SOURCES_CONFIG } from './config';
+import { getFilterConfig, getSourcesConfig } from './dynamic-config';
 import { filterJobs } from './filter';
 import { sendServerChanNotification } from './notify';
 import { filterNewItems, markItemsAsProcessed } from './redis';
@@ -37,20 +37,24 @@ export async function runMonitoringWorkflow(): Promise<{
   };
   results: ScrapeResult[];
 }> {
-  console.log(`[Workflow Start] 正在启动招聘监控工作流...`);
+  // 动态读取最新的数据源与过滤关键词规则
+  const sourcesConfig = await getSourcesConfig();
+  const filterConfig = await getFilterConfig();
+
+  console.log(`[Workflow Start] 正在启动招聘监控工作流 (已加载 ${sourcesConfig.length} 个数据源)...`);
 
   const results: ScrapeResult[] = [];
   const allMatchedItems: JobItem[] = [];
   let totalFetchedCount = 0;
 
   // 1. 并发抓取所有配置的监控源
-  const scrapePromises = SOURCES_CONFIG.map(async (source) => {
+  const scrapePromises = sourcesConfig.map(async (source) => {
     try {
       const adapter = createAdapter(source);
       const fetchedItems = await adapter.fetchItems();
 
       // 关键词过滤
-      const matched = filterJobs(fetchedItems, DEFAULT_FILTER_CONFIG);
+      const matched = filterJobs(fetchedItems, filterConfig);
 
       return {
         sourceId: source.id,
@@ -86,7 +90,7 @@ export async function runMonitoringWorkflow(): Promise<{
   });
 
   console.log(
-    `[Scraper Summary] 抓取完成。数据源: ${SOURCES_CONFIG.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
+    `[Scraper Summary] 抓取完成。数据源: ${sourcesConfig.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
   );
 
   // 2. Redis 去重：挑选出从未推送过的全新岗位
@@ -106,7 +110,7 @@ export async function runMonitoringWorkflow(): Promise<{
 
   return {
     summary: {
-      totalSources: SOURCES_CONFIG.length,
+      totalSources: sourcesConfig.length,
       totalFetched: totalFetchedCount,
       totalMatched: allMatchedItems.length,
       newPushedCount: pushSuccess ? newUnsentItems.length : 0,
