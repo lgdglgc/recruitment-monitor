@@ -2,9 +2,10 @@ import { validateAuth } from '@/lib/auth';
 import { runMonitoringWorkflow } from '@/lib/scraper';
 import { NextRequest, NextResponse } from 'next/server';
 
-// 确保函数在 Node.js Serverless 运行时中执行，并开启 dynamic 模式
+// 确保函数在 Node.js Serverless 运行时中执行，并开启 dynamic 模式与 60 秒运行超时
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 /**
  * 定时任务 Trigger Handler

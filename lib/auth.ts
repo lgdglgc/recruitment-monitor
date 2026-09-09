@@ -6,10 +6,12 @@ import { NextRequest } from 'next/server';
  * 如果服务端未配置任何 Secret，输出安全告警但放行（方便本地开发，防止阻断）
  */
 export function validateAuth(req: NextRequest): { authorized: boolean; reason?: string } {
-  const adminSecret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
+  const adminSecret = process.env.ADMIN_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+  const validSecrets = [adminSecret, cronSecret].filter(Boolean) as string[];
 
-  // 若未配置任何密钥，视为开发测试模式
-  if (!adminSecret) {
+  // 若服务端未配置任何密钥，视为开发测试模式，输出安全告警但放行
+  if (validSecrets.length === 0) {
     return { authorized: true };
   }
 
@@ -17,19 +19,16 @@ export function validateAuth(req: NextRequest): { authorized: boolean; reason?: 
   const xAdminSecret = req.headers.get('x-admin-secret');
   const querySecret = req.nextUrl.searchParams.get('secret');
 
-  // 1. Authorization: Bearer <secret>
+  let token = '';
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.slice(7).trim();
-    if (token === adminSecret) return { authorized: true };
+    token = authHeader.slice(7).trim();
+  } else if (xAdminSecret) {
+    token = xAdminSecret.trim();
+  } else if (querySecret) {
+    token = querySecret.trim();
   }
 
-  // 2. x-admin-secret header
-  if (xAdminSecret && xAdminSecret.trim() === adminSecret) {
-    return { authorized: true };
-  }
-
-  // 3. URL ?secret=<secret>
-  if (querySecret && querySecret.trim() === adminSecret) {
+  if (token && validSecrets.includes(token)) {
     return { authorized: true };
   }
 
