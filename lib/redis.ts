@@ -16,6 +16,13 @@ if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) 
   console.warn('[Redis Warning] 未检测到 UPSTASH_REDIS_REST_URL 或 UPSTASH_REDIS_REST_TOKEN 环境变量，将使用内存去重模式 (注意：Serverless 环境重启后内存会清空)。');
 }
 
+/**
+ * 获取全局统一的 Upstash Redis 客户端单例
+ */
+export function getRedisClient(): Redis | null {
+  return redisClient;
+}
+
 // 内存降级去重集合 (本地无 Redis 测试用)
 const inMemorySeenSet = new Set<string>();
 

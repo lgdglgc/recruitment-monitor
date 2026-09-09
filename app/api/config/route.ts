@@ -1,3 +1,4 @@
+import { validateAuth } from '@/lib/auth';
 import { getFilterConfig, getSourcesConfig, saveFilterConfig, saveSourcesConfig } from '@/lib/dynamic-config';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -23,6 +24,15 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    // 管理端鉴权校验
+    const auth = validateAuth(req);
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { success: false, error: auth.reason || '无权限修改系统配置 (Unauthorized)' },
+        { status: 401 }
+      );
+    }
+
     const body = await req.json();
 
     if (body.sources && Array.isArray(body.sources)) {

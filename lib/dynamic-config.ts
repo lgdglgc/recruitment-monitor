@@ -1,15 +1,6 @@
-import { Redis } from '@upstash/redis';
 import { DEFAULT_FILTER_CONFIG, SOURCES_CONFIG } from './config';
+import { getRedisClient } from './redis';
 import { FilterConfig, SourceConfig } from './types';
-
-let redisClient: Redis | null = null;
-
-if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
-  redisClient = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN,
-  });
-}
 
 const SOURCES_REDIS_KEY = 'config:sources';
 const FILTER_REDIS_KEY = 'config:filter';
@@ -22,10 +13,12 @@ let inMemoryFilter: FilterConfig = { ...DEFAULT_FILTER_CONFIG };
  * 获取当前启用的数据源配置（优先从 Upstash Redis 获取）
  */
 export async function getSourcesConfig(): Promise<SourceConfig[]> {
+  const redisClient = getRedisClient();
   if (redisClient) {
     try {
       const data = await redisClient.get<SourceConfig[]>(SOURCES_REDIS_KEY);
-      if (data && Array.isArray(data) && data.length > 0) {
+      // 只要 Redis 中有保存的数组（即使为空数组 []），都以用户保存的为主，避免无法删空
+      if (data !== null && Array.isArray(data)) {
         return data;
       }
     } catch (err) {
@@ -40,6 +33,7 @@ export async function getSourcesConfig(): Promise<SourceConfig[]> {
  */
 export async function saveSourcesConfig(sources: SourceConfig[]): Promise<boolean> {
   inMemorySources = sources;
+  const redisClient = getRedisClient();
   if (redisClient) {
     try {
       await redisClient.set(SOURCES_REDIS_KEY, sources);
@@ -56,11 +50,17 @@ export async function saveSourcesConfig(sources: SourceConfig[]): Promise<boolea
  * 获取当前的关键词过滤配置
  */
 export async function getFilterConfig(): Promise<FilterConfig> {
+  const redisClient = getRedisClient();
   if (redisClient) {
     try {
       const data = await redisClient.get<FilterConfig>(FILTER_REDIS_KEY);
       if (data && typeof data === 'object') {
-        return data;
+        return {
+          ...DEFAULT_FILTER_CONFIG,
+          ...data,
+          // 兼容历史 Redis 数据无 excludeKeywords 的情况
+          excludeKeywords: data.excludeKeywords || DEFAULT_FILTER_CONFIG.excludeKeywords || [],
+        };
       }
     } catch (err) {
       console.error('[DynamicConfig] 从 Redis 读取过滤配置失败:', err);
@@ -74,6 +74,7 @@ export async function getFilterConfig(): Promise<FilterConfig> {
  */
 export async function saveFilterConfig(config: FilterConfig): Promise<boolean> {
   inMemoryFilter = config;
+  const redisClient = getRedisClient();
   if (redisClient) {
     try {
       await redisClient.set(FILTER_REDIS_KEY, config);

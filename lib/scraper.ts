@@ -3,7 +3,8 @@ import { HTMLAdapter } from './adapters/html';
 import { RSSAdapter } from './adapters/rss';
 import { getFilterConfig, getSourcesConfig } from './dynamic-config';
 import { filterJobs } from './filter';
-import { sendServerChanNotification } from './notify';
+import { sendAllNotifications } from './notify';
+import { batchAnalyzeJobsWithAI } from './ai';
 import { filterNewItems, markItemsAsProcessed, saveRecentJobs } from './redis';
 import { JobItem, ScrapeResult, SourceConfig } from './types';
 
@@ -31,6 +32,7 @@ export function createAdapter(config: SourceConfig) {
 export async function runMonitoringWorkflow(): Promise<{
   summary: {
     totalSources: number;
+    activeSources: number;
     totalFetched: number;
     totalMatched: number;
     newPushedCount: number;
@@ -41,19 +43,24 @@ export async function runMonitoringWorkflow(): Promise<{
   const sourcesConfig = await getSourcesConfig();
   const filterConfig = await getFilterConfig();
 
-  console.log(`[Workflow Start] 正在启动招聘监控工作流 (已加载 ${sourcesConfig.length} 个数据源)...`);
+  // 过滤出启用的数据源 (enabled 默认为 true)
+  const activeSources = sourcesConfig.filter((s) => s.enabled !== false);
+
+  console.log(
+    `[Workflow Start] 正在启动招聘监控工作流 (数据源总计: ${sourcesConfig.length}, 启用中: ${activeSources.length})...`
+  );
 
   const results: ScrapeResult[] = [];
   const allMatchedItems: JobItem[] = [];
   let totalFetchedCount = 0;
 
-  // 1. 并发抓取所有配置的监控源
-  const scrapePromises = sourcesConfig.map(async (source) => {
+  // 1. 并发抓取所有启用的监控源
+  const scrapePromises = activeSources.map(async (source) => {
     try {
       const adapter = createAdapter(source);
       const fetchedItems = await adapter.fetchItems();
 
-      // 关键词过滤
+      // 关键词与黑名单过滤
       const matched = filterJobs(fetchedItems, filterConfig);
 
       return {
@@ -61,7 +68,7 @@ export async function runMonitoringWorkflow(): Promise<{
         sourceName: source.name,
         totalFetched: fetchedItems.length,
         matchedCount: matched.length,
-        newCount: 0,
+        newCount: 0, // 先占位，后续去重后精准回填
         items: matched,
       } as ScrapeResult;
     } catch (err: any) {
@@ -90,7 +97,7 @@ export async function runMonitoringWorkflow(): Promise<{
   });
 
   console.log(
-    `[Scraper Summary] 抓取完成。数据源: ${sourcesConfig.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
+    `[Scraper Summary] 抓取完成。启用源: ${activeSources.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
   );
 
   // 1.5 保存所有匹配到的岗位到 Redis 持久化展示缓存 (供前端界面浏览)
@@ -102,20 +109,35 @@ export async function runMonitoringWorkflow(): Promise<{
   const newUnsentItems = await filterNewItems(allMatchedItems);
   console.log(`[Dedupe Summary] 经过 Upstash Redis 去重后，剩余 ${newUnsentItems.length} 条新内容待推送。`);
 
-  // 3. 执行推送 (如存在新条目)
-  let pushSuccess = false;
+  // 精准回填每个源的新增条数 newCount
+  const newIdSet = new Set(newUnsentItems.map((item) => item.id));
+  for (const r of results) {
+    r.newCount = r.items.filter((item) => newIdSet.has(item.id)).length;
+  }
+
+  // 2.5 仅对通过去重的全新待推送条目执行 AI 智能提炼 (极省 Token，绝不阻塞常规爬虫)
+  let itemsToPush = newUnsentItems;
   if (newUnsentItems.length > 0) {
-    pushSuccess = await sendServerChanNotification(newUnsentItems);
+    itemsToPush = await batchAnalyzeJobsWithAI(newUnsentItems);
+    // 将带有 AI 简报的最新条目同步更新回 Redis 缓存，方便前端大厅直接展示
+    await saveRecentJobs(itemsToPush);
+  }
+
+  // 3. 执行多渠道推送 (如存在新条目)
+  let pushSuccess = false;
+  if (itemsToPush.length > 0) {
+    pushSuccess = await sendAllNotifications(itemsToPush);
 
     // 4. 推送成功后，在 Upstash Redis 中标记该批条目为已处理
     if (pushSuccess) {
-      await markItemsAsProcessed(newUnsentItems);
+      await markItemsAsProcessed(itemsToPush);
     }
   }
 
   return {
     summary: {
       totalSources: sourcesConfig.length,
+      activeSources: activeSources.length,
       totalFetched: totalFetchedCount,
       totalMatched: allMatchedItems.length,
       newPushedCount: pushSuccess ? newUnsentItems.length : 0,

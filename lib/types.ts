@@ -1,4 +1,16 @@
 /**
+ * AI 智能分析提取的招聘简报结构
+ */
+export interface AIAnalysisResult {
+  summary: string;           // 一句话核心速览
+  targetAudience?: string;   // 招录对象 (应届生/社会招聘/高层次人才)
+  requirements?: string;     // 核心学历或专业要求
+  deadline?: string;         // 报名/考试时间点
+  isRecruitment?: boolean;   // 是否为真实招录公告
+  highlights?: string[];     // 亮点标签 (如: 事业编制/南阳市县联考)
+}
+
+/**
  * 招聘信息单条数据结构
  */
 export interface JobItem {
@@ -8,6 +20,7 @@ export interface JobItem {
   date?: string;       // 发布日期
   summary?: string;    // 内容摘要/简介
   sourceName: string;  // 数据来源名称
+  aiAnalysis?: AIAnalysisResult; // AI 深度分析速览
 }
 
 /**
@@ -23,6 +36,7 @@ export interface SourceConfig {
   name: string;
   type: SourceType;
   url: string;
+  enabled?: boolean; // 是否启用此数据源 (默认为 true)
   // 针对 HTML 爬虫的 CSS 选择器配置
   selector?: {
     container: string; // 列表容器选择器
@@ -46,8 +60,9 @@ export type FilterMode = 'OR' | 'AND';
  * 过滤规则配置
  */
 export interface FilterConfig {
-  years: string[];     // 年份关键词 (如 ['2026', '2027'])
-  keywords: string[];  // 核心关键词 (如 ['校招', '春招', '秋招', '应届', '招聘', '岗位'])
+  years: string[];            // 年份关键词 (如 ['2026', '2027'])
+  keywords: string[];         // 核心关键词 (如 ['校招', '春招', '秋招', '应届', '招聘', '岗位'])
+  excludeKeywords?: string[]; // 排除词黑名单 (如 ['体检', '公示', '拟录用', '递补', '培训'])
   mode: FilterMode;
 }
 

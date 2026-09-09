@@ -9,6 +9,7 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<FilterConfig>({
     years: ['2026', '2027'],
     keywords: ['校招', '春招', '秋招', '应届', '招聘', '岗位', '实习'],
+    excludeKeywords: ['体检', '拟聘', '拟录用', '结果公示', '递补', '资格复审', '真题', '网校培训', '冲刺班'],
     mode: 'AND',
   });
 
@@ -17,36 +18,49 @@ export default function Dashboard() {
   const [jobsLoading, setJobsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 15;
 
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Admin Secret / Auth Token state
+  const [adminSecret, setAdminSecret] = useState<string>('');
+  const [secretInput, setSecretInput] = useState<string>('');
+  const [showSecretModal, setShowSecretModal] = useState<boolean>(false);
+
   // Modals state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
   const [showTestModal, setShowTestModal] = useState<boolean>(false);
 
   // New Source Form state
   const [newSource, setNewSource] = useState<Partial<SourceConfig>>({
     name: '',
-    type: 'rss',
+    type: 'html',
+    enabled: true,
     url: '',
     selector: {
-      container: '.job-list .item',
-      title: '.title a',
-      link: '.title a',
-      date: '.date',
-      summary: '.desc',
+      container: 'ul li:has(a[title])',
+      title: 'a',
+      link: 'a',
+      date: '.time',
+      summary: '',
     },
   });
+
+  // Editing Source Form state
+  const [editingSource, setEditingSource] = useState<SourceConfig | null>(null);
 
   // Batch import text
   const [batchText, setBatchText] = useState<string>('');
 
-  // Year & Keyword input states
+  // Year & Keyword & Exclude input states
   const [newYearInput, setNewYearInput] = useState<string>('');
   const [newKeywordInput, setNewKeywordInput] = useState<string>('');
+  const [newExcludeInput, setNewExcludeInput] = useState<string>('');
 
   // Testing Single Source state
   const [testResult, setTestResult] = useState<{
@@ -68,6 +82,32 @@ export default function Dashboard() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  // 构造带有认证 Token 的请求头
+  const getAuthHeaders = () => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (adminSecret) {
+      headers['Authorization'] = `Bearer ${adminSecret}`;
+    }
+    return headers;
+  };
+
+  // 从 LocalStorage 初始化 Admin Secret
+  useEffect(() => {
+    const saved = localStorage.getItem('recruitment_monitor_admin_secret') || '';
+    setAdminSecret(saved);
+    setSecretInput(saved);
+  }, []);
+
+  const handleSaveSecret = () => {
+    const trimmed = secretInput.trim();
+    localStorage.setItem('recruitment_monitor_admin_secret', trimmed);
+    setAdminSecret(trimmed);
+    setShowSecretModal(false);
+    showToast(trimmed ? '🔑 管理员密钥已保存至本地' : 'ℹ️ 已清除本地管理员密钥');
+  };
+
   // Fetch initial configs
   const fetchConfig = async () => {
     setLoading(true);
@@ -76,7 +116,22 @@ export default function Dashboard() {
       const data = await res.json();
       if (data.success) {
         setSources(data.sources || []);
-        setFilter(data.filter || filter);
+        if (data.filter) {
+          setFilter({
+            ...data.filter,
+            excludeKeywords: data.filter.excludeKeywords || [
+              '体检',
+              '拟聘',
+              '拟录用',
+              '结果公示',
+              '递补',
+              '资格复审',
+              '真题',
+              '网校培训',
+              '冲刺班',
+            ],
+          });
+        }
       }
     } catch (err) {
       showToast('⚠️ 加载配置失败，使用本地缓存');
@@ -112,7 +167,7 @@ export default function Dashboard() {
     try {
       const res = await fetch('/api/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           sources: newSources || sources,
           filter: newFilter || filter,
@@ -124,7 +179,12 @@ export default function Dashboard() {
         if (newSources) setSources(newSources);
         if (newFilter) setFilter(newFilter);
       } else {
-        showToast(`❌ 保存失败: ${data.error}`);
+        if (res.status === 401) {
+          setShowSecretModal(true);
+          showToast(`🔒 未授权: 请点击右上角设置正确的管理密钥`);
+        } else {
+          showToast(`❌ 保存失败: ${data.error}`);
+        }
       }
     } catch (err: any) {
       showToast(`❌ 请求异常: ${err.message}`);
@@ -143,7 +203,8 @@ export default function Dashboard() {
     const item: SourceConfig = {
       id: `src-${Date.now()}`,
       name: newSource.name,
-      type: newSource.type || 'rss',
+      type: newSource.type || 'html',
+      enabled: true,
       url: newSource.url,
       selector: newSource.type === 'html' ? newSource.selector : undefined,
     };
@@ -153,14 +214,53 @@ export default function Dashboard() {
     setShowAddModal(false);
     setNewSource({
       name: '',
-      type: 'rss',
+      type: 'html',
+      enabled: true,
       url: '',
       selector: {
-        container: '.job-list .item',
-        title: '.title a',
-        link: '.title a',
+        container: 'ul li:has(a[title])',
+        title: 'a',
+        link: 'a',
+        date: '.time',
       },
     });
+  };
+
+  // Open Edit Modal
+  const handleOpenEditModal = (source: SourceConfig) => {
+    setEditingSource({
+      ...source,
+      selector: source.selector || {
+        container: 'ul li:has(a[title])',
+        title: 'a',
+        link: 'a',
+      },
+    });
+    setShowEditModal(true);
+  };
+
+  // Save Edited Source
+  const handleSaveEditedSource = () => {
+    if (!editingSource || !editingSource.name || !editingSource.url) {
+      showToast('⚠️ 请填写完整的数据源名称和 URL 地址！');
+      return;
+    }
+
+    const updated = sources.map((s) => (s.id === editingSource.id ? editingSource : s));
+    saveConfigToBackend(updated, undefined);
+    setShowEditModal(false);
+    setEditingSource(null);
+  };
+
+  // Toggle Source Enabled/Disabled
+  const handleToggleSource = (id: string) => {
+    const updated = sources.map((s) => {
+      if (s.id === id) {
+        return { ...s, enabled: s.enabled === false ? true : false };
+      }
+      return s;
+    });
+    saveConfigToBackend(updated, undefined);
   };
 
   // Delete Source
@@ -187,6 +287,7 @@ export default function Dashboard() {
               id: `src-${Date.now()}-${idx}`,
               name: obj.name || `导入数据源 ${idx + 1}`,
               type: obj.type || (obj.url.includes('.xml') || obj.url.includes('rss') ? 'rss' : 'html'),
+              enabled: obj.enabled !== false,
               url: obj.url,
               selector: obj.selector,
             });
@@ -198,8 +299,9 @@ export default function Dashboard() {
           id: `src-${Date.now()}-${idx}`,
           name: isRss ? `微信/RSS 订阅源 ${idx + 1}` : `招聘网页 ${idx + 1}`,
           type: isRss ? 'rss' : 'html',
+          enabled: true,
           url: line,
-          selector: isRss ? undefined : { container: 'body', title: 'a', link: 'a' },
+          selector: isRss ? undefined : { container: 'ul li:has(a[title])', title: 'a', link: 'a' },
         });
       }
     });
@@ -223,7 +325,7 @@ export default function Dashboard() {
     try {
       const res = await fetch('/api/test-source', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ source }),
       });
       const data = await res.json();
@@ -237,7 +339,12 @@ export default function Dashboard() {
           matchedItems: data.matchedItems,
         });
       } else {
-        setTestResult({ loading: false, sourceName: source.name, error: data.error });
+        if (res.status === 401) {
+          setShowSecretModal(true);
+          setTestResult({ loading: false, sourceName: source.name, error: '未授权：请先配置管理密钥' });
+        } else {
+          setTestResult({ loading: false, sourceName: source.name, error: data.error });
+        }
       }
     } catch (err: any) {
       setTestResult({ loading: false, sourceName: source.name, error: err.message });
@@ -250,14 +357,22 @@ export default function Dashboard() {
     setFullWorkflowResult(null);
 
     try {
-      const res = await fetch('/api/cron');
+      const res = await fetch('/api/cron', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       setFullWorkflowResult(data);
       if (data.success) {
-        showToast(`✅ 抓取与推送测试完成！新增推送 ${data.summary?.newPushedCount || 0} 条。`);
+        showToast(`✅ 抓取推送完成！新增推送 ${data.summary?.newPushedCount || 0} 条。`);
         await fetchRecentJobs();
       } else {
-        showToast(`❌ 执行中断: ${data.message || data.error}`);
+        if (res.status === 401) {
+          setShowSecretModal(true);
+          showToast(`🔒 未授权: 请点击右上角设置正确的管理密钥`);
+        } else {
+          showToast(`❌ 执行中断: ${data.message || data.error}`);
+        }
       }
     } catch (err: any) {
       showToast(`❌ 请求异常: ${err.message}`);
@@ -267,23 +382,26 @@ export default function Dashboard() {
   };
 
   // Tag helper
-  const addTag = (type: 'years' | 'keywords', val: string) => {
+  const addTag = (type: 'years' | 'keywords' | 'excludeKeywords', val: string) => {
     if (!val.trim()) return;
     const v = val.trim();
-    if (!filter[type].includes(v)) {
+    const currentList = filter[type] || [];
+    if (!currentList.includes(v)) {
       setFilter({
         ...filter,
-        [type]: [...filter[type], v],
+        [type]: [...currentList, v],
       });
     }
     if (type === 'years') setNewYearInput('');
     if (type === 'keywords') setNewKeywordInput('');
+    if (type === 'excludeKeywords') setNewExcludeInput('');
   };
 
-  const removeTag = (type: 'years' | 'keywords', tag: string) => {
+  const removeTag = (type: 'years' | 'keywords' | 'excludeKeywords', tag: string) => {
+    const currentList = filter[type] || [];
     setFilter({
       ...filter,
-      [type]: filter[type].filter((t) => t !== tag),
+      [type]: currentList.filter((t) => t !== tag),
     });
   };
 
@@ -292,10 +410,22 @@ export default function Dashboard() {
     const matchQuery =
       !searchQuery.trim() ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+      (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim())) ||
+      (job.aiAnalysis?.summary && job.aiAnalysis.summary.toLowerCase().includes(searchQuery.toLowerCase().trim())) ||
+      (job.aiAnalysis?.requirements && job.aiAnalysis.requirements.toLowerCase().includes(searchQuery.toLowerCase().trim()));
     const matchSource = !selectedSourceFilter || job.sourceName === selectedSourceFilter;
     return matchQuery && matchSource;
   });
+
+  // Pagination for Jobs Tab
+  const totalPages = Math.ceil(filteredJobs.length / pageSize) || 1;
+  const paginatedJobs = filteredJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const handlePageChange = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
 
   return (
     <div>
@@ -328,9 +458,19 @@ export default function Dashboard() {
           <span>招聘监控推送系统 (Recruitment Monitor)</span>
         </div>
         <div className="navbar-right">
+          <span className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+            🤖 AI 智能提炼 (Gemini 3.8 Flash)
+          </span>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowSecretModal(true)}
+            title="设置用于保护公网 API 接口的管理密钥"
+          >
+            {adminSecret ? '🔒 密钥已配置' : '🔑 设置管理密钥'}
+          </button>
           <span className="status-badge">
             <span className="dot"></span>
-            Upstash Redis 存储同步中
+            Redis 同步中
           </span>
           <button
             className="btn btn-primary"
@@ -348,7 +488,10 @@ export default function Dashboard() {
         <nav className="tabs-nav">
           <button
             className={`tab-btn ${activeTab === 'jobs' ? 'active' : ''}`}
-            onClick={() => setActiveTab('jobs')}
+            onClick={() => {
+              setActiveTab('jobs');
+              setCurrentPage(1);
+            }}
           >
             📋 最新招聘大厅 ({recentJobs.length})
           </button>
@@ -375,11 +518,20 @@ export default function Dashboard() {
         {/* TAB 0: Recent Jobs */}
         {activeTab === 'jobs' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.25rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginBottom: '1.25rem',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '1rem',
+              }}
+            >
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>📋 最新抓取招聘信息大厅</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  查看并检索系统中已保存和抓取到的最新相关招聘岗位条目（最多保留最新 200 条）
+                  查看并检索系统中已保存和抓取到的最新相关招聘岗位条目（含 AI 智能岗位简报，最多保留 200 条）
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -395,14 +547,20 @@ export default function Dashboard() {
                 <input
                   type="text"
                   className="form-input filter-input"
-                  placeholder="🔍 搜索招聘标题、岗位关键词或摘要..."
+                  placeholder="🔍 搜索招聘标题、岗位关键词、专业或摘要..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
                 />
                 <select
                   className="form-select filter-select"
                   value={selectedSourceFilter}
-                  onChange={(e) => setSelectedSourceFilter(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedSourceFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                 >
                   <option value="">全部监控数据源</option>
                   {Array.from(new Set(recentJobs.map((j) => j.sourceName))).map((src) => (
@@ -426,7 +584,11 @@ export default function Dashboard() {
                     <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>
                       尚无已抓取的历史招聘岗位记录。
                     </p>
-                    <button className="btn btn-primary" onClick={handleRunFullWorkflow} disabled={fullWorkflowRunning}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleRunFullWorkflow}
+                      disabled={fullWorkflowRunning}
+                    >
                       🚀 立即触发全量抓取
                     </button>
                   </div>
@@ -435,57 +597,134 @@ export default function Dashboard() {
                 )}
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {filteredJobs.map((item, idx) => (
-                  <div
-                    key={item.id || idx}
-                    className="card"
-                    style={{
-                      padding: '1.25rem',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.65rem',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                      <a
-                        href={item.link}
-                        target="_blank"
-                        rel="noreferrer"
+              <div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {paginatedJobs.map((item, idx) => (
+                    <div
+                      key={item.id || idx}
+                      className="card"
+                      style={{
+                        padding: '1.25rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.65rem',
+                      }}
+                    >
+                      <div
                         style={{
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          color: '#60a5fa',
-                          lineHeight: '1.4',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: '1rem',
                         }}
                       >
-                        {item.title}
-                      </a>
-                      <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
-                        {item.sourceName}
-                      </span>
-                    </div>
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            fontSize: '1.05rem',
+                            fontWeight: 700,
+                            color: '#60a5fa',
+                            lineHeight: '1.4',
+                          }}
+                        >
+                          {item.title}
+                        </a>
+                        <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
+                          {item.sourceName}
+                        </span>
+                      </div>
 
-                    {item.summary && (
-                      <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                        {item.summary}
-                      </p>
-                    )}
+                      {/* AI Briefing Card (if analyzed) */}
+                      {item.aiAnalysis && (
+                        <div className="ai-brief-card">
+                          <div className="ai-brief-header">
+                            <span>🤖 AI 智能简报</span>
+                            {item.aiAnalysis.targetAudience && (
+                              <span style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '0.1rem 0.4rem', borderRadius: '0.25rem' }}>
+                                👥 {item.aiAnalysis.targetAudience}
+                              </span>
+                            )}
+                            {item.aiAnalysis.deadline && (
+                              <span style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fde047', padding: '0.1rem 0.4rem', borderRadius: '0.25rem' }}>
+                                ⏰ {item.aiAnalysis.deadline}
+                              </span>
+                            )}
+                          </div>
+                          <p className="ai-brief-summary">{item.aiAnalysis.summary}</p>
+                          {item.aiAnalysis.requirements && (
+                            <div className="ai-brief-detail">
+                              🎓 <strong>学历与专业：</strong> {item.aiAnalysis.requirements}
+                            </div>
+                          )}
+                          {item.aiAnalysis.highlights && item.aiAnalysis.highlights.length > 0 && (
+                            <div className="ai-highlights">
+                              {item.aiAnalysis.highlights.map((h, i) => (
+                                <span key={i} className="highlight-chip">
+                                  {h}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem', fontSize: '0.8rem', color: '#94a3b8' }}>
-                      <span>📅 发布时间: {item.date || '未知'}</span>
-                      <a
-                        href={item.link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-secondary"
-                        style={{ fontSize: '0.8rem', padding: '0.25rem 0.65rem' }}
+                      {!item.aiAnalysis && item.summary && (
+                        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                          {item.summary}
+                        </p>
+                      )}
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: '0.25rem',
+                          fontSize: '0.8rem',
+                          color: '#94a3b8',
+                        }}
                       >
-                        👉 查看原文 ↗
-                      </a>
+                        <span>📅 发布时间: {item.date || '未知'}</span>
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '0.25rem 0.65rem' }}
+                        >
+                          👉 查看原文 ↗
+                        </a>
+                      </div>
                     </div>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="pagination-container">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handlePageChange(currentPage - 1)}
+                      disabled={currentPage === 1}
+                      style={{ fontSize: '0.85rem' }}
+                    >
+                      ◀ 上一页
+                    </button>
+                    <span className="pagination-info">
+                      第 <strong>{currentPage}</strong> / {totalPages} 页 (共 {filteredJobs.length} 条)
+                    </span>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => handlePageChange(currentPage + 1)}
+                      disabled={currentPage === totalPages}
+                      style={{ fontSize: '0.85rem' }}
+                    >
+                      下一页 ▶
+                    </button>
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>
@@ -494,7 +733,14 @@ export default function Dashboard() {
         {/* TAB 1: Sources */}
         {activeTab === 'sources' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1.25rem', alignItems: 'center' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginBottom: '1.25rem',
+                alignItems: 'center',
+              }}
+            >
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>监控源清单</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -525,7 +771,12 @@ export default function Dashboard() {
                   <div key={item.id} className="source-item">
                     <div>
                       <div className="source-header">
-                        <span className="source-title">{item.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span className="source-title">{item.name}</span>
+                          <span className={item.enabled !== false ? 'badge-enabled' : 'badge-disabled'}>
+                            {item.enabled !== false ? '🟢 抓取中' : '⏸️ 已暂停'}
+                          </span>
+                        </div>
                         <span className={`type-tag ${item.type === 'rss' ? 'type-rss' : 'type-html'}`}>
                           {item.type.toUpperCase()}
                         </span>
@@ -535,19 +786,61 @@ export default function Dashboard() {
                       </div>
 
                       {item.selector && (
-                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem', background: '#0f172a', padding: '0.5rem', borderRadius: '0.35rem' }}>
+                        <div
+                          style={{
+                            fontSize: '0.75rem',
+                            color: '#94a3b8',
+                            marginTop: '0.5rem',
+                            background: '#0f172a',
+                            padding: '0.5rem',
+                            borderRadius: '0.35rem',
+                          }}
+                        >
                           容器: <code>{item.selector.container}</code> | 标题: <code>{item.selector.title}</code>
+                          {item.selector.date && <span> | 日期: <code>{item.selector.date}</code></span>}
                         </div>
                       )}
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
-                      <button className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }} onClick={() => handleTestSource(item)}>
-                        🔍 单源在线测试
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginTop: '0.75rem',
+                      }}
+                    >
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                        onClick={() => handleToggleSource(item.id)}
+                      >
+                        {item.enabled !== false ? '⏸️ 暂停' : '▶️ 启用'}
                       </button>
-                      <button className="btn btn-danger" style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }} onClick={() => handleDeleteSource(item.id)}>
-                        🗑️ 删除
-                      </button>
+
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                          onClick={() => handleTestSource(item)}
+                        >
+                          🔍 测试
+                        </button>
+                        <button
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                          onClick={() => handleOpenEditModal(item)}
+                        >
+                          ✏️ 编辑
+                        </button>
+                        <button
+                          className="btn btn-danger"
+                          style={{ fontSize: '0.8rem', padding: '0.35rem 0.65rem' }}
+                          onClick={() => handleDeleteSource(item.id)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -560,7 +853,9 @@ export default function Dashboard() {
         {activeTab === 'filter' && (
           <div>
             <div className="card">
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>🎯 关键词与年份过滤配置</h2>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>
+                🎯 关键词、年份与黑名单排除规则
+              </h2>
 
               {/* Years */}
               <div className="form-group">
@@ -574,13 +869,17 @@ export default function Dashboard() {
                     onChange={(e) => setNewYearInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addTag('years', newYearInput)}
                   />
-                  <button className="btn btn-secondary" onClick={() => addTag('years', newYearInput)}>添加</button>
+                  <button className="btn btn-secondary" onClick={() => addTag('years', newYearInput)}>
+                    添加
+                  </button>
                 </div>
                 <div className="tag-container">
                   {filter.years.map((y) => (
                     <span key={y} className="tag">
                       {y}
-                      <span className="tag-remove" onClick={() => removeTag('years', y)}>×</span>
+                      <span className="tag-remove" onClick={() => removeTag('years', y)}>
+                        ×
+                      </span>
                     </span>
                   ))}
                 </div>
@@ -588,23 +887,59 @@ export default function Dashboard() {
 
               {/* Keywords */}
               <div className="form-group" style={{ marginTop: '1.5rem' }}>
-                <label className="form-label">招聘目标关键词 (标题或摘要包含任意一个即匹配)</label>
+                <label className="form-label">
+                  招聘目标核心关键词 (标题或摘要包含任意一个即匹配，如: 校招, 春招, 工程师, 招聘)
+                </label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="输入关键词回车添加 (如: 校招, 春招, 工程师)..."
+                    placeholder="输入关键词回车添加..."
                     value={newKeywordInput}
                     onChange={(e) => setNewKeywordInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addTag('keywords', newKeywordInput)}
                   />
-                  <button className="btn btn-secondary" onClick={() => addTag('keywords', newKeywordInput)}>添加</button>
+                  <button className="btn btn-secondary" onClick={() => addTag('keywords', newKeywordInput)}>
+                    添加
+                  </button>
                 </div>
                 <div className="tag-container">
                   {filter.keywords.map((kw) => (
                     <span key={kw} className="tag" style={{ background: '#3b82f6', color: '#fff' }}>
                       {kw}
-                      <span className="tag-remove" style={{ color: '#fff' }} onClick={() => removeTag('keywords', kw)}>×</span>
+                      <span className="tag-remove" style={{ color: '#fff' }} onClick={() => removeTag('keywords', kw)}>
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Exclude Keywords (Blacklist) */}
+              <div className="form-group" style={{ marginTop: '1.5rem' }}>
+                <label className="form-label" style={{ color: '#fca5a5' }}>
+                  🛡️ 排除词黑名单 (命中任意词直接丢弃，过滤体检公告、结果公示、辅导广告等干扰)
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="输入排除词回车添加 (例如: 体检, 递补, 拟聘用, 培训班)..."
+                    value={newExcludeInput}
+                    onChange={(e) => setNewExcludeInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addTag('excludeKeywords', newExcludeInput)}
+                  />
+                  <button className="btn btn-secondary" onClick={() => addTag('excludeKeywords', newExcludeInput)}>
+                    添加排除词
+                  </button>
+                </div>
+                <div className="tag-container">
+                  {(filter.excludeKeywords || []).map((ex) => (
+                    <span key={ex} className="tag tag-exclude">
+                      🚫 {ex}
+                      <span className="tag-remove" onClick={() => removeTag('excludeKeywords', ex)}>
+                        ×
+                      </span>
                     </span>
                   ))}
                 </div>
@@ -618,14 +953,20 @@ export default function Dashboard() {
                   value={filter.mode}
                   onChange={(e) => setFilter({ ...filter, mode: e.target.value as any })}
                 >
-                  <option value="AND">AND 模式：标题/摘要必须【包含年份之一】并且【包含核心关键词之一】 (推荐)</option>
-                  <option value="OR">OR 模式：包含年份或包含关键词中任意一个即可推送</option>
+                  <option value="AND">
+                    AND 模式：必须包含目标年份或核心关键词之一，且排除过时历史与黑名单 (推荐)
+                  </option>
+                  <option value="OR">OR 模式：满足年份或关键词中任意一个即可推送</option>
                 </select>
               </div>
 
               <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="btn btn-primary" onClick={() => saveConfigToBackend(undefined, filter)} disabled={saving}>
-                  {saving ? '保存中...' : '💾 保存关键词规则至 Redis'}
+                <button
+                  className="btn btn-primary"
+                  onClick={() => saveConfigToBackend(undefined, filter)}
+                  disabled={saving}
+                >
+                  {saving ? '保存中...' : '💾 保存关键词与排除规则至 Redis'}
                 </button>
               </div>
             </div>
@@ -636,10 +977,19 @@ export default function Dashboard() {
         {activeTab === 'tester' && (
           <div>
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '1.5rem',
+                }}
+              >
                 <div>
                   <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>🔍 全量数据源抓取测试与实时匹配结果</h2>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>在线执行全部数据源的拉取与关键词过滤，预览推送到微信的 Markdown 条目</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    在线执行全部启用的数据源拉取与关键词过滤，预览推送到微信/企微/飞书的 Markdown 条目（含 AI 提炼）
+                  </p>
                 </div>
                 <button className="btn btn-primary" onClick={handleRunFullWorkflow} disabled={fullWorkflowRunning}>
                   {fullWorkflowRunning ? '⚡ 抓取测试中...' : '🚀 开始执行测试'}
@@ -648,14 +998,37 @@ export default function Dashboard() {
 
               {fullWorkflowResult && (
                 <div>
-                  <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                    <div>监控源总数: <strong>{fullWorkflowResult.summary?.totalSources}</strong></div>
-                    <div>抓取总条目数: <strong>{fullWorkflowResult.summary?.totalFetched}</strong></div>
-                    <div>符合关键词匹配数: <strong style={{ color: '#10b981' }}>{fullWorkflowResult.summary?.totalMatched}</strong></div>
-                    <div>实际全新推送数: <strong style={{ color: '#8b5cf6' }}>{fullWorkflowResult.summary?.newPushedCount}</strong></div>
+                  <div
+                    style={{
+                      background: '#0f172a',
+                      padding: '1rem',
+                      borderRadius: '0.5rem',
+                      marginBottom: '1.5rem',
+                      display: 'flex',
+                      gap: '1.5rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      监控源总数: <strong>{fullWorkflowResult.summary?.totalSources}</strong> (启用:{' '}
+                      {fullWorkflowResult.summary?.activeSources})
+                    </div>
+                    <div>
+                      抓取总条目数: <strong>{fullWorkflowResult.summary?.totalFetched}</strong>
+                    </div>
+                    <div>
+                      符合关键词匹配数:{' '}
+                      <strong style={{ color: '#10b981' }}>{fullWorkflowResult.summary?.totalMatched}</strong>
+                    </div>
+                    <div>
+                      实际全新推送数:{' '}
+                      <strong style={{ color: '#8b5cf6' }}>{fullWorkflowResult.summary?.newPushedCount}</strong>
+                    </div>
                   </div>
 
-                  <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem' }}>匹配的招聘岗位明细：</h3>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.75rem' }}>
+                    匹配的招聘岗位明细：
+                  </h3>
                   {fullWorkflowResult.results?.flatMap((r: any) => r.items).length === 0 ? (
                     <p style={{ color: 'var(--text-muted)' }}>没有找到符合当前关键词规则的招考招聘信息。</p>
                   ) : (
@@ -664,7 +1037,7 @@ export default function Dashboard() {
                         <thead>
                           <tr>
                             <th>数据来源</th>
-                            <th>标题</th>
+                            <th>标题与 AI 提炼</th>
                             <th>发布时间</th>
                             <th>详情链接</th>
                           </tr>
@@ -672,10 +1045,23 @@ export default function Dashboard() {
                         <tbody>
                           {fullWorkflowResult.results?.flatMap((r: any) => r.items).map((item: JobItem, idx: number) => (
                             <tr key={idx}>
-                              <td><span className="type-tag type-rss">{item.sourceName}</span></td>
-                              <td><strong>{item.title}</strong></td>
+                              <td>
+                                <span className="type-tag type-rss">{item.sourceName}</span>
+                              </td>
+                              <td>
+                                <strong>{item.title}</strong>
+                                {item.aiAnalysis && (
+                                  <div style={{ fontSize: '0.8rem', color: '#a5b4fc', marginTop: '0.3rem' }}>
+                                    🤖 {item.aiAnalysis.summary}
+                                  </div>
+                                )}
+                              </td>
                               <td>{item.date || '-'}</td>
-                              <td><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>查看原文 ↗</a></td>
+                              <td>
+                                <a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
+                                  查看原文 ↗
+                                </a>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -689,6 +1075,40 @@ export default function Dashboard() {
         )}
       </main>
 
+      {/* Modal: Admin Secret */}
+      {showSecretModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>
+              🔑 管理员访问密钥设置
+            </h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+              若生产环境配置了 <code>ADMIN_SECRET</code> 或 <code>CRON_SECRET</code> 环境变量，请在此输入对应的密码以获得修改配置与手工触发权限。密钥将保存在当前浏览器的本地存储中。
+            </p>
+
+            <div className="form-group">
+              <label className="form-label">管理员密钥 (Token / Secret)</label>
+              <input
+                type="password"
+                className="form-input"
+                placeholder="输入你的 ADMIN_SECRET 或 CRON_SECRET..."
+                value={secretInput}
+                onChange={(e) => setSecretInput(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowSecretModal(false)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveSecret}>
+                保存密钥
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Add Source */}
       {showAddModal && (
         <div className="modal-overlay">
@@ -696,7 +1116,7 @@ export default function Dashboard() {
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>➕ 添加新监控数据源</h3>
 
             <div className="form-group">
-              <label className="form-label">数据源名称 (例如: XX大学就业网 或 微信公众号「招聘」)</label>
+              <label className="form-label">数据源名称 (例如: 南阳人事考试网 或 微信公众号「名企校招」)</label>
               <input
                 type="text"
                 className="form-input"
@@ -713,8 +1133,8 @@ export default function Dashboard() {
                 value={newSource.type}
                 onChange={(e) => setNewSource({ ...newSource, type: e.target.value as any })}
               >
-                <option value="rss">RSS / 微信公众号 RSS 源</option>
                 <option value="html">网页爬虫 (HTML 页面 CSS 选择器)</option>
+                <option value="rss">RSS / 微信公众号 RSS 源</option>
               </select>
             </div>
 
@@ -723,25 +1143,37 @@ export default function Dashboard() {
               <input
                 type="text"
                 className="form-input"
-                placeholder="https://..."
+                placeholder="http://www.nysrsksw.cn/ (注意是否支持 https)"
                 value={newSource.url}
                 onChange={(e) => setNewSource({ ...newSource, url: e.target.value })}
               />
             </div>
 
             {newSource.type === 'html' && (
-              <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.25rem' }}>
-                <h4 style={{ fontSize: '0.9rem', marginBottom: '0.75rem', color: '#c084fc' }}>HTML CSS 选择器配置：</h4>
+              <div
+                style={{
+                  background: '#0f172a',
+                  padding: '1rem',
+                  borderRadius: '0.5rem',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                <h4 style={{ fontSize: '0.9rem', marginBottom: '0.75rem', color: '#c084fc' }}>
+                  HTML CSS 选择器配置：
+                </h4>
                 <div className="form-group">
                   <label className="form-label">列表项容器选择器 (container)</label>
                   <input
                     type="text"
                     className="form-input"
+                    placeholder="如: ul li:has(a[title]) 或 ul li"
                     value={newSource.selector?.container}
-                    onChange={(e) => setNewSource({
-                      ...newSource,
-                      selector: { ...newSource.selector!, container: e.target.value }
-                    })}
+                    onChange={(e) =>
+                      setNewSource({
+                        ...newSource,
+                        selector: { ...newSource.selector!, container: e.target.value },
+                      })
+                    }
                   />
                 </div>
                 <div className="form-group">
@@ -750,18 +1182,162 @@ export default function Dashboard() {
                     type="text"
                     className="form-input"
                     value={newSource.selector?.title}
-                    onChange={(e) => setNewSource({
-                      ...newSource,
-                      selector: { ...newSource.selector!, title: e.target.value, link: e.target.value }
-                    })}
+                    onChange={(e) =>
+                      setNewSource({
+                        ...newSource,
+                        selector: { ...newSource.selector!, title: e.target.value, link: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">发布日期选择器 (date，可选)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="如: .time 或 .date"
+                    value={newSource.selector?.date || ''}
+                    onChange={(e) =>
+                      setNewSource({
+                        ...newSource,
+                        selector: { ...newSource.selector!, date: e.target.value },
+                      })
+                    }
                   />
                 </div>
               </div>
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowAddModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleAddSource}>保存数据源</button>
+              <button className="btn btn-secondary" onClick={() => setShowAddModal(false)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={handleAddSource}>
+                保存数据源
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Source */}
+      {showEditModal && editingSource && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>
+              ✏️ 编辑监控数据源: {editingSource.name}
+            </h3>
+
+            <div className="form-group">
+              <label className="form-label">数据源名称</label>
+              <input
+                type="text"
+                className="form-input"
+                value={editingSource.name}
+                onChange={(e) => setEditingSource({ ...editingSource, name: e.target.value })}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">数据源类型</label>
+              <select
+                className="form-select"
+                value={editingSource.type}
+                onChange={(e) => setEditingSource({ ...editingSource, type: e.target.value as any })}
+              >
+                <option value="html">网页爬虫 (HTML 页面 CSS 选择器)</option>
+                <option value="rss">RSS / 微信公众号 RSS 源</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">URL 目标地址</label>
+              <input
+                type="text"
+                className="form-input"
+                value={editingSource.url}
+                onChange={(e) => setEditingSource({ ...editingSource, url: e.target.value })}
+              />
+            </div>
+
+            {editingSource.type === 'html' && (
+              <div
+                style={{
+                  background: '#0f172a',
+                  padding: '1rem',
+                  borderRadius: '0.5rem',
+                  marginBottom: '1.25rem',
+                }}
+              >
+                <h4 style={{ fontSize: '0.9rem', marginBottom: '0.75rem', color: '#c084fc' }}>
+                  HTML CSS 选择器配置：
+                </h4>
+                <div className="form-group">
+                  <label className="form-label">列表项容器选择器 (container)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingSource.selector?.container || ''}
+                    onChange={(e) =>
+                      setEditingSource({
+                        ...editingSource,
+                        selector: { ...editingSource.selector!, container: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">标题选择器 (title)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingSource.selector?.title || ''}
+                    onChange={(e) =>
+                      setEditingSource({
+                        ...editingSource,
+                        selector: { ...editingSource.selector!, title: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">详情链接选择器 (link)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingSource.selector?.link || ''}
+                    onChange={(e) =>
+                      setEditingSource({
+                        ...editingSource,
+                        selector: { ...editingSource.selector!, link: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">发布日期选择器 (date，可选)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingSource.selector?.date || ''}
+                    onChange={(e) =>
+                      setEditingSource({
+                        ...editingSource,
+                        selector: { ...editingSource.selector!, date: e.target.value },
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
+              <button className="btn btn-secondary" onClick={() => setShowEditModal(false)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveEditedSource}>
+                保存更改
+              </button>
             </div>
           </div>
         </div>
@@ -778,13 +1354,17 @@ export default function Dashboard() {
             <textarea
               className="form-textarea"
               rows={8}
-              placeholder="https://xxx/rss.xml&#10;https://xxx/campus/job-list"
+              placeholder="http://www.nysrsksw.cn/&#10;https://xxx/rss.xml"
               value={batchText}
               onChange={(e) => setBatchText(e.target.value)}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowBatchModal(false)}>取消</button>
-              <button className="btn btn-primary" onClick={handleBatchImport}>确认导入</button>
+              <button className="btn btn-secondary" onClick={() => setShowBatchModal(false)}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={handleBatchImport}>
+                确认导入
+              </button>
             </div>
           </div>
         </div>
@@ -795,19 +1375,27 @@ export default function Dashboard() {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '720px' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>
-              🔍 单源抓取测试 preview: {testResult.sourceName}
+              🔍 单源抓取测试: {testResult.sourceName}
             </h3>
 
             {testResult.loading ? (
               <div style={{ padding: '2rem', textAlign: 'center' }}>正在连接网络抓取中，请稍候...</div>
             ) : testResult.error ? (
-              <div style={{ color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '1rem', borderRadius: '0.5rem' }}>
+              <div
+                style={{
+                  color: '#f87171',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  padding: '1rem',
+                  borderRadius: '0.5rem',
+                }}
+              >
                 抓取失败: {testResult.error}
               </div>
             ) : (
               <div>
                 <p style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>
-                  成功抓取到总量 <strong>{testResult.totalFetched}</strong> 条，其中符合当前关键词匹配的条目: <strong style={{ color: '#10b981' }}>{testResult.matchedCount}</strong> 条。
+                  成功抓取到总量 <strong>{testResult.totalFetched}</strong> 条，其中符合当前关键词匹配的条目:{' '}
+                  <strong style={{ color: '#10b981' }}>{testResult.matchedCount}</strong> 条。
                 </p>
 
                 <div style={{ maxHeight: '350px', overflowY: 'auto' }}>
@@ -824,7 +1412,11 @@ export default function Dashboard() {
                         <tr key={idx}>
                           <td>{item.title}</td>
                           <td>{item.date || '-'}</td>
-                          <td><a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>打开 ↗</a></td>
+                          <td>
+                            <a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#60a5fa' }}>
+                              打开 ↗
+                            </a>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -834,7 +1426,9 @@ export default function Dashboard() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowTestModal(false)}>关闭</button>
+              <button className="btn btn-secondary" onClick={() => setShowTestModal(false)}>
+                关闭
+              </button>
             </div>
           </div>
         </div>

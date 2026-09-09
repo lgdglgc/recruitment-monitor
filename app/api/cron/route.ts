@@ -1,3 +1,4 @@
+import { validateAuth } from '@/lib/auth';
 import { runMonitoringWorkflow } from '@/lib/scraper';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -19,23 +20,14 @@ export async function POST(req: NextRequest) {
 
 async function handleCronTrigger(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const secretParam = req.nextUrl.searchParams.get('secret');
-
-    const expectedSecret = process.env.CRON_SECRET;
-
-    // 校验 Authorization 密钥 (如配置了 CRON_SECRET)
-    if (expectedSecret) {
-      const isHeaderMatch = authHeader === `Bearer ${expectedSecret}`;
-      const isParamMatch = secretParam === expectedSecret;
-
-      if (!isHeaderMatch && !isParamMatch) {
-        console.warn('[Cron Auth Alert] 尝试访问 Cron 路由但密钥不符合！');
-        return NextResponse.json(
-          { success: false, message: 'Unauthorized: Invalid CRON_SECRET token.' },
-          { status: 401 }
-        );
-      }
+    // 校验 Authorization 密钥 (优先 ADMIN_SECRET 或 CRON_SECRET)
+    const auth = validateAuth(req);
+    if (!auth.authorized) {
+      console.warn('[Cron Auth Alert] 尝试访问 Cron 路由但密钥不符合！');
+      return NextResponse.json(
+        { success: false, message: 'Unauthorized: Invalid authentication token.' },
+        { status: 401 }
+      );
     }
 
     // 运行主逻辑
