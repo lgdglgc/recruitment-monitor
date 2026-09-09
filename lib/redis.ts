@@ -111,14 +111,14 @@ export async function markItemsAsProcessed(items: JobItem[]): Promise<void> {
 }
 
 /**
- * Redis 最近岗位存储 Key 与最大保留条数
+ * Redis 最近岗位存储 Key 与最大保留条数 (支持保留历史每日数据，最多 1000 条)
  */
 const RECENT_JOBS_KEY = 'jobs:recent';
-const MAX_RECENT_JOBS = 200;
+const MAX_RECENT_JOBS = 1000;
 let inMemoryRecentJobs: JobItem[] = [];
 
 /**
- * 保存/合并最新抓取到的岗位列表 (保留最近 200 条)
+ * 保存/合并抓取到的岗位列表 (保留历史每日数据，最多 1000 条，并保留首次收录日期)
  */
 export async function saveRecentJobs(items: JobItem[]): Promise<void> {
   if (!items || items.length === 0) return;
@@ -128,52 +128,100 @@ export async function saveRecentJobs(items: JobItem[]): Promise<void> {
       const existing = (await redisClient.get<JobItem[]>(RECENT_JOBS_KEY)) || [];
       const map = new Map<string, JobItem>();
 
-      // 最新抓取的条目排在前面
-      for (const item of items) {
-        if (item.id) map.set(item.id, item);
+      // 建立已存在项字典，方便保留其原始首次收录日期
+      const existingMap = new Map<string, JobItem>();
+      for (const item of existing) {
+        if (item.id) existingMap.set(item.id, item);
       }
+
+      // 处理新抓取的条目
+      for (const item of items) {
+        if (!item.id) continue;
+        const old = existingMap.get(item.id);
+        if (old && old.crawledDate) {
+          // 保留初次发现和收录的日期
+          map.set(item.id, { ...item, crawledDate: old.crawledDate });
+        } else {
+          map.set(item.id, item);
+        }
+      }
+
+      // 将历史已有但本次未抓到的条目追加回来
       for (const item of existing) {
         if (item.id && !map.has(item.id)) {
           map.set(item.id, item);
         }
       }
 
-      const merged = Array.from(map.values()).slice(0, MAX_RECENT_JOBS);
+      // 按收录日期降序排列（最新收录的排在最前）
+      const merged = Array.from(map.values())
+        .sort((a, b) => {
+          const dateA = a.crawledDate || a.date || '';
+          const dateB = b.crawledDate || b.date || '';
+          return dateB.localeCompare(dateA);
+        })
+        .slice(0, MAX_RECENT_JOBS);
+
       await redisClient.set(RECENT_JOBS_KEY, merged);
       inMemoryRecentJobs = merged;
       return;
     } catch (error) {
-      console.error('[Redis Error] 保存最新岗位列表失败:', error);
+      console.error('[Redis Error] 保存岗位历史数据失败:', error);
     }
   }
 
   // 内存降级保存
+  const existingMap = new Map<string, JobItem>();
+  for (const item of inMemoryRecentJobs) {
+    if (item.id) existingMap.set(item.id, item);
+  }
+
   const map = new Map<string, JobItem>();
   for (const item of items) {
-    if (item.id) map.set(item.id, item);
+    if (!item.id) continue;
+    const old = existingMap.get(item.id);
+    if (old && old.crawledDate) {
+      map.set(item.id, { ...item, crawledDate: old.crawledDate });
+    } else {
+      map.set(item.id, item);
+    }
   }
   for (const item of inMemoryRecentJobs) {
     if (item.id && !map.has(item.id)) {
       map.set(item.id, item);
     }
   }
-  inMemoryRecentJobs = Array.from(map.values()).slice(0, MAX_RECENT_JOBS);
+  inMemoryRecentJobs = Array.from(map.values())
+    .sort((a, b) => {
+      const dateA = a.crawledDate || a.date || '';
+      const dateB = b.crawledDate || b.date || '';
+      return dateB.localeCompare(dateA);
+    })
+    .slice(0, MAX_RECENT_JOBS);
 }
 
 /**
- * 获取最新抓取的岗位列表
+ * 获取抓取的历史岗位列表 (按日期排序)
  */
 export async function getRecentJobs(): Promise<JobItem[]> {
   if (redisClient) {
     try {
       const data = await redisClient.get<JobItem[]>(RECENT_JOBS_KEY);
       if (data && Array.isArray(data)) {
-        return data;
+        return data.sort((a, b) => {
+          const dateA = a.crawledDate || a.date || '';
+          const dateB = b.crawledDate || b.date || '';
+          return dateB.localeCompare(dateA);
+        });
       }
     } catch (error) {
-      console.error('[Redis Error] 读取最新岗位列表失败:', error);
+      console.error('[Redis Error] 读取岗位历史数据失败:', error);
     }
   }
-  return inMemoryRecentJobs;
+  return inMemoryRecentJobs.sort((a, b) => {
+    const dateA = a.crawledDate || a.date || '';
+    const dateB = b.crawledDate || b.date || '';
+    return dateB.localeCompare(dateA);
+  });
 }
 

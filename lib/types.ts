@@ -5,7 +5,8 @@ export interface JobItem {
   id: string;          // 唯一标识 (通常为 URL 的 MD5 哈希或原文章 ID)
   title: string;       // 招聘标题
   link: string;        // 详情链接
-  date?: string;       // 发布日期
+  date?: string;       // 原始公告发布日期 (如 2026-09-10)
+  crawledDate?: string;// 系统监控抓取并收录的日期 (如 2026-09-10)
   summary?: string;    // 内容摘要/简介
   sourceName: string;  // 数据来源名称
 }

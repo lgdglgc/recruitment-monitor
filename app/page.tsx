@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [jobsLoading, setJobsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 15;
 
@@ -292,7 +293,7 @@ export default function Dashboard() {
               selector: obj.selector,
             });
           }
-        } catch (e) {}
+        } catch (e) { }
       } else if (line.startsWith('http')) {
         const isRss = line.includes('.xml') || line.includes('rss') || line.includes('feed');
         newItems.push({
@@ -405,6 +406,25 @@ export default function Dashboard() {
     });
   };
 
+  const todayStr = (() => {
+    try {
+      return new Intl.DateTimeFormat('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+        .format(new Date())
+        .replace(/\//g, '-');
+    } catch (e) {
+      return new Date().toISOString().split('T')[0];
+    }
+  })();
+
+  const availableDates = Array.from(
+    new Set(recentJobs.map((j) => j.crawledDate || j.date || '').filter(Boolean))
+  ).sort((a, b) => b.localeCompare(a));
+
   // Filter jobs for Jobs Tab
   const filteredJobs = recentJobs.filter((job) => {
     const matchQuery =
@@ -412,7 +432,9 @@ export default function Dashboard() {
       job.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
       (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim()));
     const matchSource = !selectedSourceFilter || job.sourceName === selectedSourceFilter;
-    return matchQuery && matchSource;
+    const jobDate = job.crawledDate || job.date || '';
+    const matchDate = !selectedDateFilter || jobDate === selectedDateFilter;
+    return matchQuery && matchSource && matchDate;
   });
 
   // Pagination for Jobs Tab
@@ -525,8 +547,8 @@ export default function Dashboard() {
             >
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>📋 最新抓取招聘信息大厅</h2>
-                <p className="tab-desc">
-                  查看并检索系统中已保存和抓取的最新相关招聘岗位条目 (最多保留 200 条)
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                  按收录日期每日归档区分已抓取的招聘信息，历史数据持久保存 (最多保留 1000 条)
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -536,7 +558,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Filter Bar */}
+            {/* Filter Bar with Date Selector */}
             <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
               <div className="filter-bar-grid">
                 <input
@@ -549,6 +571,25 @@ export default function Dashboard() {
                     setCurrentPage(1);
                   }}
                 />
+                <select
+                  className="form-select filter-select"
+                  value={selectedDateFilter}
+                  onChange={(e) => {
+                    setSelectedDateFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                >
+                  <option value="">📅 全部收录日期 ({recentJobs.length} 条)</option>
+                  {availableDates.map((d) => {
+                    const count = recentJobs.filter((j) => (j.crawledDate || j.date) === d).length;
+                    const isToday = d === todayStr;
+                    return (
+                      <option key={d} value={d}>
+                        {isToday ? `🌟 今日新增 (${d})` : `📅 ${d}`} ({count} 条)
+                      </option>
+                    );
+                  })}
+                </select>
                 <select
                   className="form-select filter-select"
                   value={selectedSourceFilter}
@@ -631,6 +672,31 @@ export default function Dashboard() {
                         </span>
                       </div>
 
+                      {/* Date Badges: Distinguish today's newly added items */}
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        {item.crawledDate === todayStr ? (
+                          <span className="date-badge-today">
+                            <span>🟢</span> 今日新增收录: {item.crawledDate}
+                          </span>
+                        ) : item.crawledDate ? (
+                          <span className="date-badge-history">
+                            <span>📅</span> 历史收录: {item.crawledDate}
+                          </span>
+                        ) : null}
+                        {item.date && (
+                          <span
+                            className="date-badge-history"
+                            style={{
+                              background: 'rgba(59, 130, 246, 0.12)',
+                              color: '#93c5fd',
+                              borderColor: 'rgba(59, 130, 246, 0.25)',
+                            }}
+                          >
+                            <span>📰</span> 官方发布日期: {item.date}
+                          </span>
+                        )}
+                      </div>
+
                       {item.summary && (
                         <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
                           {item.summary}
@@ -647,7 +713,7 @@ export default function Dashboard() {
                           color: '#94a3b8',
                         }}
                       >
-                        <span>📅 发布时间: {item.date || '未知'}</span>
+                        <span>🔗 数据源: {item.sourceName}</span>
                         <a
                           href={item.link}
                           target="_blank"

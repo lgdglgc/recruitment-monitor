@@ -9,33 +9,44 @@ import { JobItem } from './types';
  */
 export function formatMarkdownDigest(items: JobItem[]): { title: string; desp: string } {
   const count = items.length;
-  const nowStr = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+  const now = new Date();
+  const dateStr = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(now)
+    .replace(/\//g, '-');
 
-  const title = `🎯 找到 ${count} 条最新招聘信息通知 (${nowStr.slice(5, 16)})`;
+  const timeStr = now.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 
-  let desp = `### 📢 招聘监控最新提醒\n\n`;
-  desp += `> 监测时间：${nowStr}\n`;
-  desp += `> 本次共匹配到 **${count}** 条关键岗位信息：\n\n`;
+  const title = `📢 招聘监控日报 (${dateStr}) - 今日新增 ${count} 条匹配岗位`;
+
+  let desp = `### 📢 招聘监控每日提醒 (${dateStr})\n\n`;
+  desp += `> **推送日期**：${dateStr} ${timeStr} (北京时间)\n`;
+  desp += `> **今日新增**：经过关键词筛选与自动去重，今日收录 **${count}** 条新岗位：\n\n`;
   desp += `---\n\n`;
 
   items.forEach((item, index) => {
     desp += `#### ${index + 1}. [${item.title}](${item.link})\n`;
-    desp += `- **来源**: \`${item.sourceName}\``;
+    desp += `- **来源平台**: \`${item.sourceName}\``;
     if (item.date) {
-      desp += ` | **发布时间**: ${item.date}`;
+      desp += ` | **公告发布**: \`${item.date}\``;
     }
+    desp += ` | **收录日期**: \`${item.crawledDate || dateStr}\``;
     desp += `\n\n`;
 
     if (item.summary) {
       const cleanSummary = item.summary.replace(/\s+/g, ' ').slice(0, 150);
-      desp += `- **摘要**: ${cleanSummary}...\n\n`;
+      desp += `- **摘要内容**: ${cleanSummary}...\n\n`;
     }
 
-    desp += `[👉 点击查看官方详情](${item.link})\n\n`;
+    desp += `[👉 点击查看原文公告](${item.link})\n\n`;
     desp += `---\n\n`;
   });
 
-  desp += `*由 Recruitment Monitor 监控系统自动推送*`;
+  desp += `*由 Recruitment Monitor 定时监控系统自动发送*`;
 
   return { title, desp };
 }

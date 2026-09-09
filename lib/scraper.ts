@@ -8,6 +8,24 @@ import { filterNewItems, markItemsAsProcessed, saveRecentJobs } from './redis';
 import { JobItem, ScrapeResult, SourceConfig } from './types';
 
 /**
+ * 获取当前北京时间日期字符串 (YYYY-MM-DD)
+ */
+export function getTodayDateString(): string {
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .format(new Date())
+      .replace(/\//g, '-');
+  } catch (e) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+/**
  * 根据源配置实例化对应的适配器
  */
 export function createAdapter(config: SourceConfig) {
@@ -38,6 +56,8 @@ export async function runMonitoringWorkflow(): Promise<{
   };
   results: ScrapeResult[];
 }> {
+  const todayStr = getTodayDateString();
+
   // 动态读取最新的数据源与过滤关键词规则
   const sourcesConfig = await getSourcesConfig();
   const filterConfig = await getFilterConfig();
@@ -46,7 +66,7 @@ export async function runMonitoringWorkflow(): Promise<{
   const activeSources = sourcesConfig.filter((s) => s.enabled !== false);
 
   console.log(
-    `[Workflow Start] 正在启动招聘监控工作流 (数据源总计: ${sourcesConfig.length}, 启用中: ${activeSources.length})...`
+    `[Workflow Start] 启动招聘监控工作流 [日期: ${todayStr}] (数据源: ${sourcesConfig.length}, 启用: ${activeSources.length})...`
   );
 
   const results: ScrapeResult[] = [];
@@ -61,6 +81,13 @@ export async function runMonitoringWorkflow(): Promise<{
 
       // 关键词与黑名单过滤
       const matched = filterJobs(fetchedItems, filterConfig);
+
+      // 为每条匹配岗位打上收录日期标签
+      matched.forEach((item) => {
+        if (!item.crawledDate) {
+          item.crawledDate = todayStr;
+        }
+      });
 
       return {
         sourceId: source.id,
@@ -99,14 +126,14 @@ export async function runMonitoringWorkflow(): Promise<{
     `[Scraper Summary] 抓取完成。启用源: ${activeSources.length}，抓取总量: ${totalFetchedCount}，关键词匹配符合项: ${allMatchedItems.length}`
   );
 
-  // 1.5 保存所有匹配到的岗位到 Redis 持久化展示缓存 (供前端界面浏览)
+  // 1.5 保存所有匹配到的岗位到 Redis 持久化展示缓存 (供前端界面浏览，按抓取日期保存历史记录)
   if (allMatchedItems.length > 0) {
     await saveRecentJobs(allMatchedItems);
   }
 
   // 2. Redis 去重：挑选出从未推送过的全新岗位
   const newUnsentItems = await filterNewItems(allMatchedItems);
-  console.log(`[Dedupe Summary] 经过 Upstash Redis 去重后，剩余 ${newUnsentItems.length} 条新内容待推送。`);
+  console.log(`[Dedupe Summary] 经过 Upstash Redis 去重后，剩余 ${newUnsentItems.length} 条今日新增待推送内容。`);
 
   // 精准回填每个源的新增条数 newCount
   const newIdSet = new Set(newUnsentItems.map((item) => item.id));
