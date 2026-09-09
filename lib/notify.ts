@@ -26,25 +26,8 @@ export function formatMarkdownDigest(items: JobItem[]): { title: string; desp: s
     }
     desp += `\n\n`;
 
-    // 若包含 AI 智能提炼简报，优先展示结构化卡片
-    if (item.aiAnalysis) {
-      desp += `> 🤖 **AI 智能速览**：${item.aiAnalysis.summary}\n`;
-      if (item.aiAnalysis.requirements) {
-        desp += `> 🎓 **学历专业**：${item.aiAnalysis.requirements}\n`;
-      }
-      if (item.aiAnalysis.targetAudience) {
-        desp += `> 👥 **招录对象**：${item.aiAnalysis.targetAudience}\n`;
-      }
-      if (item.aiAnalysis.deadline) {
-        desp += `> ⏰ **时间节点**：${item.aiAnalysis.deadline}\n`;
-      }
-      if (item.aiAnalysis.highlights && item.aiAnalysis.highlights.length > 0) {
-        desp += `> 💡 **核心亮点**：\`${item.aiAnalysis.highlights.join('` `')}\`\n`;
-      }
-      desp += `\n`;
-    } else if (item.summary) {
-      // 降级使用基础摘要
-      const cleanSummary = item.summary.replace(/\s+/g, ' ').slice(0, 120);
+    if (item.summary) {
+      const cleanSummary = item.summary.replace(/\s+/g, ' ').slice(0, 150);
       desp += `- **摘要**: ${cleanSummary}...\n\n`;
     }
 

@@ -1,16 +1,4 @@
 /**
- * AI 智能分析提取的招聘简报结构
- */
-export interface AIAnalysisResult {
-  summary: string;           // 一句话核心速览
-  targetAudience?: string;   // 招录对象 (应届生/社会招聘/高层次人才)
-  requirements?: string;     // 核心学历或专业要求
-  deadline?: string;         // 报名/考试时间点
-  isRecruitment?: boolean;   // 是否为真实招录公告
-  highlights?: string[];     // 亮点标签 (如: 事业编制/南阳市县联考)
-}
-
-/**
  * 招聘信息单条数据结构
  */
 export interface JobItem {
@@ -20,7 +8,6 @@ export interface JobItem {
   date?: string;       // 发布日期
   summary?: string;    // 内容摘要/简介
   sourceName: string;  // 数据来源名称
-  aiAnalysis?: AIAnalysisResult; // AI 深度分析速览
 }
 
 /**

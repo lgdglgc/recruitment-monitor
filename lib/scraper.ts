@@ -4,7 +4,6 @@ import { RSSAdapter } from './adapters/rss';
 import { getFilterConfig, getSourcesConfig } from './dynamic-config';
 import { filterJobs } from './filter';
 import { sendAllNotifications } from './notify';
-import { batchAnalyzeJobsWithAI } from './ai';
 import { filterNewItems, markItemsAsProcessed, saveRecentJobs } from './redis';
 import { JobItem, ScrapeResult, SourceConfig } from './types';
 
@@ -115,22 +114,14 @@ export async function runMonitoringWorkflow(): Promise<{
     r.newCount = r.items.filter((item) => newIdSet.has(item.id)).length;
   }
 
-  // 2.5 仅对通过去重的全新待推送条目执行 AI 智能提炼 (极省 Token，绝不阻塞常规爬虫)
-  let itemsToPush = newUnsentItems;
-  if (newUnsentItems.length > 0) {
-    itemsToPush = await batchAnalyzeJobsWithAI(newUnsentItems);
-    // 将带有 AI 简报的最新条目同步更新回 Redis 缓存，方便前端大厅直接展示
-    await saveRecentJobs(itemsToPush);
-  }
-
   // 3. 执行多渠道推送 (如存在新条目)
   let pushSuccess = false;
-  if (itemsToPush.length > 0) {
-    pushSuccess = await sendAllNotifications(itemsToPush);
+  if (newUnsentItems.length > 0) {
+    pushSuccess = await sendAllNotifications(newUnsentItems);
 
     // 4. 推送成功后，在 Upstash Redis 中标记该批条目为已处理
     if (pushSuccess) {
-      await markItemsAsProcessed(itemsToPush);
+      await markItemsAsProcessed(newUnsentItems);
     }
   }
 

@@ -410,9 +410,7 @@ export default function Dashboard() {
     const matchQuery =
       !searchQuery.trim() ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim())) ||
-      (job.aiAnalysis?.summary && job.aiAnalysis.summary.toLowerCase().includes(searchQuery.toLowerCase().trim())) ||
-      (job.aiAnalysis?.requirements && job.aiAnalysis.requirements.toLowerCase().includes(searchQuery.toLowerCase().trim()));
+      (job.summary && job.summary.toLowerCase().includes(searchQuery.toLowerCase().trim()));
     const matchSource = !selectedSourceFilter || job.sourceName === selectedSourceFilter;
     return matchQuery && matchSource;
   });
@@ -458,9 +456,6 @@ export default function Dashboard() {
           <span>招聘监控推送系统 (Recruitment Monitor)</span>
         </div>
         <div className="navbar-right">
-          <span className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
-            🤖 AI 智能提炼 (Gemini 3.8 Flash)
-          </span>
           <button
             className="btn btn-secondary"
             onClick={() => setShowSecretModal(true)}
@@ -530,8 +525,8 @@ export default function Dashboard() {
             >
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>📋 最新抓取招聘信息大厅</h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  查看并检索系统中已保存和抓取到的最新相关招聘岗位条目（含 AI 智能岗位简报，最多保留 200 条）
+                <p className="tab-desc">
+                  查看并检索系统中已保存和抓取的最新相关招聘岗位条目 (最多保留 200 条)
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -636,41 +631,7 @@ export default function Dashboard() {
                         </span>
                       </div>
 
-                      {/* AI Briefing Card (if analyzed) */}
-                      {item.aiAnalysis && (
-                        <div className="ai-brief-card">
-                          <div className="ai-brief-header">
-                            <span>🤖 AI 智能简报</span>
-                            {item.aiAnalysis.targetAudience && (
-                              <span style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '0.1rem 0.4rem', borderRadius: '0.25rem' }}>
-                                👥 {item.aiAnalysis.targetAudience}
-                              </span>
-                            )}
-                            {item.aiAnalysis.deadline && (
-                              <span style={{ background: 'rgba(234, 179, 8, 0.15)', color: '#fde047', padding: '0.1rem 0.4rem', borderRadius: '0.25rem' }}>
-                                ⏰ {item.aiAnalysis.deadline}
-                              </span>
-                            )}
-                          </div>
-                          <p className="ai-brief-summary">{item.aiAnalysis.summary}</p>
-                          {item.aiAnalysis.requirements && (
-                            <div className="ai-brief-detail">
-                              🎓 <strong>学历与专业：</strong> {item.aiAnalysis.requirements}
-                            </div>
-                          )}
-                          {item.aiAnalysis.highlights && item.aiAnalysis.highlights.length > 0 && (
-                            <div className="ai-highlights">
-                              {item.aiAnalysis.highlights.map((h, i) => (
-                                <span key={i} className="highlight-chip">
-                                  {h}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {!item.aiAnalysis && item.summary && (
+                      {item.summary && (
                         <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
                           {item.summary}
                         </p>
@@ -1050,11 +1011,6 @@ export default function Dashboard() {
                               </td>
                               <td>
                                 <strong>{item.title}</strong>
-                                {item.aiAnalysis && (
-                                  <div style={{ fontSize: '0.8rem', color: '#a5b4fc', marginTop: '0.3rem' }}>
-                                    🤖 {item.aiAnalysis.summary}
-                                  </div>
-                                )}
                               </td>
                               <td>{item.date || '-'}</td>
                               <td>
