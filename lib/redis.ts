@@ -3,17 +3,21 @@ import crypto from 'crypto';
 import { DEDUPE_TTL_SECONDS } from './config';
 import { JobItem } from './types';
 
-// 初始化 Upstash Redis 客户端
-// 如果环境变量未设置，会优雅降级并打印 Warning
+// 初始化 Upstash Redis / Vercel KV 客户端
+// 支持 UPSTASH_REDIS_REST_* 与 Vercel KV 自动注入的 KV_REST_API_* 环境变量
 let redisClient: Redis | null = null;
 
-if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+
+if (redisUrl && redisToken) {
   redisClient = new Redis({
-    url: process.env.UPSTASH_REDIS_REST_URL,
-    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    url: redisUrl,
+    token: redisToken,
   });
+  console.log('[Redis Init] 成功连接至持久化数据库！');
 } else {
-  console.warn('[Redis Warning] 未检测到 UPSTASH_REDIS_REST_URL 或 UPSTASH_REDIS_REST_TOKEN 环境变量，将使用内存去重模式 (注意：Serverless 环境重启后内存会清空)。');
+  console.warn('[Redis Warning] 未检测到持久化数据库环境变量 (UPSTASH_REDIS_REST_* 或 KV_REST_API_*)，将使用内存去重模式。');
 }
 
 /**
