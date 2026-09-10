@@ -1,4 +1,3 @@
-import { validateAuth } from '@/lib/auth';
 import { runMonitoringWorkflow } from '@/lib/scraper';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -9,7 +8,7 @@ export const maxDuration = 60;
 
 /**
  * 定时任务 Trigger Handler
- * 允许 GET 与 POST 触发
+ * 允许 GET 与 POST 触发 (纯净免密模式)
  */
 export async function GET(req: NextRequest) {
   return handleCronTrigger(req);
@@ -19,17 +18,8 @@ export async function POST(req: NextRequest) {
   return handleCronTrigger(req);
 }
 
-async function handleCronTrigger(req: NextRequest) {
+async function handleCronTrigger(_req: NextRequest) {
   try {
-    // 校验 Authorization 密钥 (优先 ADMIN_SECRET 或 CRON_SECRET)
-    const auth = validateAuth(req);
-    if (!auth.authorized) {
-      console.warn('[Cron Auth Alert] 尝试访问 Cron 路由但密钥不符合！');
-      return NextResponse.json(
-        { success: false, message: 'Unauthorized: Invalid authentication token.' },
-        { status: 401 }
-      );
-    }
 
     // 运行主逻辑
     const result = await runMonitoringWorkflow();

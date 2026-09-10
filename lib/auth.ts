@@ -1,38 +1,11 @@
 import { NextRequest } from 'next/server';
 
 /**
- * 统一 API 鉴权校验函数
- * 优先使用 ADMIN_SECRET，其次复用 CRON_SECRET
- * 如果服务端未配置任何 Secret，输出安全告警但放行（方便本地开发，防止阻断）
+ * 统一 API 校验函数
+ * 免密模式：无须任何密码凭证，直接开放访问
  */
-export function validateAuth(req: NextRequest): { authorized: boolean; reason?: string } {
-  const adminSecret = process.env.ADMIN_SECRET;
-  const cronSecret = process.env.CRON_SECRET;
-  const validSecrets = [adminSecret, cronSecret].filter(Boolean) as string[];
-
-  // 若服务端未配置任何密钥，视为开发测试模式，输出安全告警但放行
-  if (validSecrets.length === 0) {
-    return { authorized: true };
-  }
-
-  const authHeader = req.headers.get('authorization');
-  const xAdminSecret = req.headers.get('x-admin-secret');
-  const querySecret = req.nextUrl.searchParams.get('secret');
-
-  let token = '';
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim();
-  } else if (xAdminSecret) {
-    token = xAdminSecret.trim();
-  } else if (querySecret) {
-    token = querySecret.trim();
-  }
-
-  if (token && validSecrets.includes(token)) {
-    return { authorized: true };
-  }
-
-  return { authorized: false, reason: '未提供有效凭证 (Unauthorized token)' };
+export function validateAuth(_req?: NextRequest): { authorized: boolean; reason?: string } {
+  return { authorized: true };
 }
 
 /**

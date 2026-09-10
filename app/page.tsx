@@ -41,10 +41,6 @@ export default function Dashboard() {
   const [saving, setSaving] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Admin Secret / Auth Token state
-  const [adminSecret, setAdminSecret] = useState<string>('');
-  const [secretInput, setSecretInput] = useState<string>('');
-  const [showSecretModal, setShowSecretModal] = useState<boolean>(false);
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -98,31 +94,19 @@ export default function Dashboard() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // 构造带有认证 Token 的请求头
+  // 构造基础请求头
   const getAuthHeaders = () => {
-    const headers: Record<string, string> = {
+    return {
       'Content-Type': 'application/json',
     };
-    if (adminSecret) {
-      headers['Authorization'] = `Bearer ${adminSecret}`;
-    }
-    return headers;
   };
 
-  // 从 LocalStorage 初始化 Admin Secret
+  // 清除本地遗留的管理员密钥缓存
   useEffect(() => {
-    const saved = localStorage.getItem('recruitment_monitor_admin_secret') || '';
-    setAdminSecret(saved);
-    setSecretInput(saved);
+    try {
+      localStorage.removeItem('recruitment_monitor_admin_secret');
+    } catch (e) {}
   }, []);
-
-  const handleSaveSecret = () => {
-    const trimmed = secretInput.trim();
-    localStorage.setItem('recruitment_monitor_admin_secret', trimmed);
-    setAdminSecret(trimmed);
-    setShowSecretModal(false);
-    showToast(trimmed ? '🔑 管理员密钥已保存至本地' : 'ℹ️ 已清除本地管理员密钥');
-  };
 
   // Fetch initial configs
   const fetchConfig = async () => {
@@ -206,12 +190,7 @@ export default function Dashboard() {
         if (newSources) setSources(newSources);
         if (newFilter) setFilter(newFilter);
       } else {
-        if (res.status === 401) {
-          setShowSecretModal(true);
-          showToast(`🔒 未授权: 请点击右上角设置正确的管理密钥`);
-        } else {
-          showToast(`❌ 保存失败: ${data.error}`);
-        }
+        showToast(`❌ 保存失败: ${data.error}`);
       }
     } catch (err: any) {
       showToast(`❌ 请求异常: ${err.message}`);
@@ -366,12 +345,7 @@ export default function Dashboard() {
           matchedItems: data.matchedItems,
         });
       } else {
-        if (res.status === 401) {
-          setShowSecretModal(true);
-          setTestResult({ loading: false, sourceName: source.name, error: '未授权：请先配置管理密钥' });
-        } else {
-          setTestResult({ loading: false, sourceName: source.name, error: data.error });
-        }
+        setTestResult({ loading: false, sourceName: source.name, error: data.error });
       }
     } catch (err: any) {
       setTestResult({ loading: false, sourceName: source.name, error: err.message });
@@ -423,12 +397,7 @@ export default function Dashboard() {
         // 自动切换到招聘大厅方便查看
         setActiveTab('jobs');
       } else {
-        if (res.status === 401) {
-          setShowSecretModal(true);
-          showToast(`🔒 未授权: 请点击右上角设置正确的管理密钥`);
-        } else {
-          showToast(`❌ 执行中断: ${data.message || data.error}`);
-        }
+        showToast(`❌ 执行中断: ${data.message || data.error}`);
       }
     } catch (err: any) {
       showToast(`❌ 请求异常: ${err.message}`);
@@ -663,13 +632,6 @@ export default function Dashboard() {
           <span>招聘监控推送系统 (Recruitment Monitor)</span>
         </div>
         <div className="navbar-right">
-          <button
-            className="btn btn-secondary"
-            onClick={() => setShowSecretModal(true)}
-            title="设置用于保护公网 API 接口的管理密钥"
-          >
-            {adminSecret ? '🔒 密钥已配置' : '🔑 设置管理密钥'}
-          </button>
           <span className="status-badge">
             <span className="dot"></span>
             Redis 同步中
@@ -1726,39 +1688,6 @@ export default function Dashboard() {
         )}
       </main>
 
-      {/* Modal: Admin Secret */}
-      {showSecretModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1rem' }}>
-              🔑 管理员访问密钥设置
-            </h3>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
-              若生产环境配置了 <code>ADMIN_SECRET</code> 或 <code>CRON_SECRET</code> 环境变量，请在此输入对应的密码以获得修改配置与手工触发权限。密钥将保存在当前浏览器的本地存储中。
-            </p>
-
-            <div className="form-group">
-              <label className="form-label">管理员密钥 (Token / Secret)</label>
-              <input
-                type="password"
-                className="form-input"
-                placeholder="输入你的 ADMIN_SECRET 或 CRON_SECRET..."
-                value={secretInput}
-                onChange={(e) => setSecretInput(e.target.value)}
-              />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1.5rem' }}>
-              <button className="btn btn-secondary" onClick={() => setShowSecretModal(false)}>
-                取消
-              </button>
-              <button className="btn btn-primary" onClick={handleSaveSecret}>
-                保存密钥
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal: Add Source */}
       {showAddModal && (

@@ -14,12 +14,10 @@ jobs:
       - name: Trigger Recruitment Scraper API
         env:
           TARGET_URL: ${{ secrets.VERCEL_PROJECT_URL || 'https://zp.kqsdw.com' }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET || 'admin123' }}
         run: |
           echo "Triggering API endpoint: ${TARGET_URL}/api/cron"
           
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET \
-            -H "Authorization: Bearer ${CRON_SECRET}" \
             "${TARGET_URL}/api/cron")
           
           HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | awk -F: '{print $2}')
