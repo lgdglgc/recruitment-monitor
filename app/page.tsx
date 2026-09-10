@@ -147,14 +147,34 @@ export default function Dashboard() {
     }
   };
 
-  // Fetch recent saved jobs
+  // Fetch recent saved jobs (优先读取 LocalStorage 确保 Serverless 降级时不丢数据)
   const fetchRecentJobs = async () => {
     setJobsLoading(true);
     try {
+      // 1. 优先读取浏览器本地持久化缓存
+      let localJobs: JobItem[] = [];
+      try {
+        const cached = localStorage.getItem('recruitment_monitor_saved_jobs');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            localJobs = parsed;
+            setRecentJobs(localJobs);
+          }
+        }
+      } catch (e) {}
+
+      // 2. 尝试从后端接口拉取 (如果有云端 Redis 持久化)
       const res = await fetch('/api/jobs');
       const data = await res.json();
-      if (data.success) {
-        setRecentJobs(data.jobs || []);
+      if (data.success && Array.isArray(data.jobs)) {
+        if (data.jobs.length > 0) {
+          setRecentJobs(data.jobs);
+          localStorage.setItem('recruitment_monitor_saved_jobs', JSON.stringify(data.jobs));
+        } else if (localJobs.length > 0) {
+          // 若云端在 Serverless 环境未配置 Redis，优先保留浏览器本地已存数据
+          setRecentJobs(localJobs);
+        }
       }
     } catch (err) {
       console.error('获取最新岗位失败', err);
@@ -371,8 +391,37 @@ export default function Dashboard() {
       const data = await res.json();
       setFullWorkflowResult(data);
       if (data.success) {
-        showToast(`✅ 抓取推送完成！新增推送 ${data.summary?.newPushedCount || 0} 条。`);
-        await fetchRecentJobs();
+        // 从抓取结果中提取所有匹配的岗位条目 (例如这次抓到的 57 条)
+        const scrapedItems: JobItem[] = data.results?.flatMap((r: any) => r.items) || [];
+
+        if (scrapedItems.length > 0) {
+          setRecentJobs((prev) => {
+            const map = new Map<string, JobItem>();
+            // 先加入新抓取的条目
+            scrapedItems.forEach((item) => {
+              if (item.id) map.set(item.id, item);
+            });
+            // 再保留历史已有的条目
+            prev.forEach((item) => {
+              if (item.id && !map.has(item.id)) {
+                map.set(item.id, item);
+              }
+            });
+            const merged = Array.from(map.values()).sort((a, b) => {
+              const dateA = a.crawledDate || a.date || '';
+              const dateB = b.crawledDate || b.date || '';
+              return dateB.localeCompare(dateA);
+            });
+            try {
+              localStorage.setItem('recruitment_monitor_saved_jobs', JSON.stringify(merged));
+            } catch (e) {}
+            return merged;
+          });
+        }
+
+        showToast(`🎉 抓取成功！大厅已收录 ${scrapedItems.length} 条岗位，新增推送 ${data.summary?.newPushedCount || 0} 条。`);
+        // 自动切换到招聘大厅方便查看
+        setActiveTab('jobs');
       } else {
         if (res.status === 401) {
           setShowSecretModal(true);
@@ -386,6 +435,37 @@ export default function Dashboard() {
     } finally {
       setFullWorkflowRunning(false);
     }
+  };
+
+  // 一键将测试抓取结果同步导入招聘大厅
+  const handleSyncTesterToHall = () => {
+    const items: JobItem[] = fullWorkflowResult?.results?.flatMap((r: any) => r.items) || [];
+    if (items.length === 0) {
+      showToast('⚠️ 暂无抓取测试结果可同步');
+      return;
+    }
+    setRecentJobs((prev) => {
+      const map = new Map<string, JobItem>();
+      items.forEach((item) => {
+        if (item.id) map.set(item.id, item);
+      });
+      prev.forEach((item) => {
+        if (item.id && !map.has(item.id)) {
+          map.set(item.id, item);
+        }
+      });
+      const merged = Array.from(map.values()).sort((a, b) => {
+        const dateA = a.crawledDate || a.date || '';
+        const dateB = b.crawledDate || b.date || '';
+        return dateB.localeCompare(dateA);
+      });
+      try {
+        localStorage.setItem('recruitment_monitor_saved_jobs', JSON.stringify(merged));
+      } catch (e) {}
+      return merged;
+    });
+    showToast(`✅ 已将 ${items.length} 条岗位同步至「最新招聘大厅」！`);
+    setActiveTab('jobs');
   };
 
   // Tag helper
@@ -835,15 +915,22 @@ export default function Dashboard() {
                 {recentJobs.length === 0 ? (
                   <div>
                     <p style={{ marginBottom: '1rem', color: 'var(--text-muted)' }}>
-                      尚无已抓取的历史招聘岗位记录。
+                      大厅中尚无保存的招聘岗位记录。
                     </p>
-                    <button
-                      className="btn btn-primary"
-                      onClick={handleRunFullWorkflow}
-                      disabled={fullWorkflowRunning}
-                    >
-                      🚀 立即触发全量抓取
-                    </button>
+                    <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                      {fullWorkflowResult?.results?.flatMap((r: any) => r.items).length > 0 && (
+                        <button className="btn btn-secondary" onClick={handleSyncTesterToHall}>
+                          📥 一键导入刚才测试抓取到的 {fullWorkflowResult.results.flatMap((r: any) => r.items).length} 条岗位
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleRunFullWorkflow}
+                        disabled={fullWorkflowRunning}
+                      >
+                        🚀 立即触发全量抓取并导入大厅
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div>
@@ -1549,9 +1636,20 @@ export default function Dashboard() {
                     在线执行全部启用的数据源拉取与关键词过滤，预览推送到微信/企微/飞书的 Markdown 条目（含 AI 提炼）
                   </p>
                 </div>
-                <button className="btn btn-primary" onClick={handleRunFullWorkflow} disabled={fullWorkflowRunning}>
-                  {fullWorkflowRunning ? '⚡ 抓取测试中...' : '🚀 开始执行测试'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {fullWorkflowResult?.results?.flatMap((r: any) => r.items).length > 0 && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleSyncTesterToHall}
+                      title="把测试列表里的这批招聘信息保存到最新招聘大厅中"
+                    >
+                      📥 同步这批岗位到大厅并浏览 ({fullWorkflowResult.results.flatMap((r: any) => r.items).length}条)
+                    </button>
+                  )}
+                  <button className="btn btn-primary" onClick={handleRunFullWorkflow} disabled={fullWorkflowRunning}>
+                    {fullWorkflowRunning ? '⚡ 抓取测试中...' : '🚀 开始执行测试'}
+                  </button>
+                </div>
               </div>
 
               {fullWorkflowResult && (
