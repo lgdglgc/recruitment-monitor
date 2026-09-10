@@ -2,9 +2,9 @@ name: Recruitment Monitor High-Frequency Scheduler
 
 on:
   schedule:
-    # 每 30 分钟触发一次 (UTC 时间)
-    - cron: '*/30 * * * *'
-  # 支持在 GitHub Actions 页面手动点击触发运行
+    # 每天早晨 09:00 (UTC 01:00)、中午 12:00 (UTC 04:00)、傍晚 18:00 (UTC 10:00) 自动触发 (北京时间)
+    - cron: '0 1,4,10 * * *'
+  # 支持在 GitHub Actions 页面随时手动点击触发运行
   workflow_dispatch:
 
 jobs:
@@ -13,14 +13,9 @@ jobs:
     steps:
       - name: Trigger Recruitment Scraper API
         env:
-          TARGET_URL: ${{ secrets.VERCEL_PROJECT_URL }} # 部署在 Vercel 上的完整域名，例如 https://my-job-monitor.vercel.app
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}        # 在 GitHub Repository Secrets 中配置的密钥
+          TARGET_URL: ${{ secrets.VERCEL_PROJECT_URL || 'https://zp.kqsdw.com' }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET || 'admin123' }}
         run: |
-          if [ -z "$TARGET_URL" ]; then
-            echo "Error: VERCEL_PROJECT_URL Secret is not configured."
-            exit 1
-          fi
-          
           echo "Triggering API endpoint: ${TARGET_URL}/api/cron"
           
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X GET \
