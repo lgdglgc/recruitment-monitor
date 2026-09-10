@@ -7,6 +7,9 @@ import { JobItem } from './types';
 /**
  * 将匹配的招聘条目格式化为整洁的 Markdown Digest 消息
  */
+/**
+ * 将匹配的招聘条目格式化为整洁的 Markdown Digest 消息 (优先置顶主治医师/医疗事业编高匹配岗位)
+ */
 export function formatMarkdownDigest(items: JobItem[]): { title: string; desp: string } {
   const count = items.length;
   const now = new Date();
@@ -21,32 +24,71 @@ export function formatMarkdownDigest(items: JobItem[]): { title: string; desp: s
 
   const timeStr = now.toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 
-  const title = `📢 招聘监控日报 (${dateStr}) - 今日新增 ${count} 条匹配岗位`;
+  // 区分高匹配岗位
+  const exactMatches = items.filter((j) => j.matchInfo?.level === 'exact');
+  const highMatches = items.filter((j) => j.matchInfo?.level === 'high');
+  const totalImportant = exactMatches.length + highMatches.length;
 
-  let desp = `### 📢 招聘监控每日提醒 (${dateStr})\n\n`;
+  let title = `📢 招聘监控日报 (${dateStr}) - 今日新增 ${count} 条岗位`;
+  if (totalImportant > 0) {
+    title = `🩺 医疗招考速递 (${dateStr}) - 发现 ${totalImportant} 条主治/医疗事业编岗位！`;
+  }
+
+  // 按意向匹配优先排序
+  const sortedItems = [...items].sort((a, b) => {
+    const scoreA = a.matchInfo?.score || 0;
+    const scoreB = b.matchInfo?.score || 0;
+    return scoreB - scoreA;
+  });
+
+  let desp = `### 🩺 南阳医疗招聘与事业编监控日报 (${dateStr})\n\n`;
   desp += `> **推送日期**：${dateStr} ${timeStr} (北京时间)\n`;
-  desp += `> **今日新增**：经过关键词筛选与自动去重，今日收录 **${count}** 条新岗位：\n\n`;
+  desp += `> **今日新增**：经过自动去重与意向匹配，收录 **${count}** 条新公告`;
+  if (totalImportant > 0) {
+    desp += `，其中 **${totalImportant}** 条强烈匹配意向！\n\n`;
+  } else {
+    desp += `。\n\n`;
+  }
   desp += `---\n\n`;
 
-  items.forEach((item, index) => {
-    desp += `#### ${index + 1}. [${item.title}](${item.link})\n`;
+  sortedItems.forEach((item, index) => {
+    const isExact = item.matchInfo?.level === 'exact';
+    const isHigh = item.matchInfo?.level === 'high';
+
+    let prefix = `${index + 1}.`;
+    if (isExact) {
+      prefix = `⭐ [极度匹配] ${index + 1}.`;
+    } else if (isHigh) {
+      prefix = `🔥 [重点推荐] ${index + 1}.`;
+    }
+
+    desp += `#### ${prefix} [${item.title}](${item.link})\n`;
     desp += `- **来源平台**: \`${item.sourceName}\``;
     if (item.date) {
       desp += ` | **公告发布**: \`${item.date}\``;
     }
     desp += ` | **收录日期**: \`${item.crawledDate || dateStr}\``;
-    desp += `\n\n`;
+    desp += `\n`;
+
+    if (item.matchInfo && (item.matchInfo.matchedRegions.length || item.matchInfo.matchedRoles.length || item.matchInfo.matchedNatures.length)) {
+      const tags = [
+        ...item.matchInfo.matchedRegions,
+        ...item.matchInfo.matchedRoles,
+        ...item.matchInfo.matchedNatures,
+      ].join(' · ');
+      desp += `- **🎯 意向命中**: \`${tags}\` (匹配度: ${item.matchInfo.score}分)\n`;
+    }
 
     if (item.summary) {
       const cleanSummary = item.summary.replace(/\s+/g, ' ').slice(0, 150);
-      desp += `- **摘要内容**: ${cleanSummary}...\n\n`;
+      desp += `- **摘要内容**: ${cleanSummary}...\n`;
     }
 
-    desp += `[👉 点击查看原文公告](${item.link})\n\n`;
+    desp += `\n[👉 点击查看原文公告详情](${item.link})\n\n`;
     desp += `---\n\n`;
   });
 
-  desp += `*由 Recruitment Monitor 定时监控系统自动发送*`;
+  desp += `*由 南阳医疗招聘与事业编监控系统 自动发送*`;
 
   return { title, desp };
 }

@@ -1,24 +1,80 @@
-import { FilterConfig, SourceConfig } from './types';
+import { FilterConfig, SourceConfig, TargetPreference } from './types';
 
 /**
- * 关键词过滤规则配置
+ * 专为【主治医师 · 南阳地区（邓州/淅川/西峡）· 医疗事业编】量身定制的意向偏好画像
+ */
+export const DEFAULT_TARGET_PREFERENCE: TargetPreference = {
+  enabled: true,
+  // 重点关注地区 (南阳市直及下辖邓州、淅川、西峡)
+  regions: ['南阳', '邓州', '淅川', '西峡'],
+  // 意向岗位与专业方向 (主治医师、临床医师、医学专业)
+  roles: [
+    '主治医师',
+    '主治',
+    '医师',
+    '医生',
+    '临床',
+    '内科',
+    '外科',
+    '妇产',
+    '儿科',
+    '急诊',
+    '全科',
+    '医疗',
+    '卫生',
+    '卫健',
+    '医院',
+  ],
+  // 意向招考与编制性质
+  natures: [
+    '编制',
+    '事业编',
+    '人才引进',
+    '招才引智',
+    '急需紧缺',
+    '绿色通道',
+    '高层次人才',
+    '公开招聘',
+    '招考',
+    '招录',
+  ],
+};
+
+/**
+ * 医疗与事业单位招聘专用过滤规则配置
  */
 export const DEFAULT_FILTER_CONFIG: FilterConfig = {
   // 关注年份
   years: ['2026', '2027'],
-  // 目标招聘关键词
-  keywords: ['校招', '春招', '秋招', '应届', '招聘', '岗位', '实习', '管培生'],
-  // 排除词黑名单 (命中任意词直接丢弃，避免体检、公示、公考培训班等干扰)
+  // 目标招聘关键词 (覆盖医疗、招考与事业单位编制)
+  keywords: [
+    '招聘',
+    '公开招聘',
+    '主治',
+    '医师',
+    '医生',
+    '医疗',
+    '卫生',
+    '卫健',
+    '医院',
+    '事业编',
+    '编制',
+    '人才引进',
+    '招才引智',
+    '招考',
+    '招录',
+    '岗位',
+  ],
+  // 排除词黑名单 (命中任意词直接丢弃，避免体检、公示、真题培训等干扰)
   excludeKeywords: ['体检', '拟聘', '拟录用', '结果公示', '递补', '资格复审', '真题', '网校培训', '冲刺班'],
-  // 匹配模式:
-  // 'AND' 表示：(包含 2026 或 2027 或不显式标年份但命中核心词) AND (包含校招/春招/秋招/应届/招聘...)
-  // 'OR' 表示：包含任意一个关键词即可
+  // 匹配模式: AND (包含年份或未标年份但强烈命中医疗/招考关键词)
   mode: 'AND',
+  // 个人求职画像
+  preferences: DEFAULT_TARGET_PREFERENCE,
 };
 
 /**
- * 监控数据源清单
- * 在这里添加你需要监控的网站链接或微信公众号 RSS
+ * 监控数据源清单 (针对南阳地区及邓州、淅川、西峡医疗招考)
  */
 export const SOURCES_CONFIG: SourceConfig[] = [
   {
@@ -36,7 +92,7 @@ export const SOURCES_CONFIG: SourceConfig[] = [
   },
   {
     id: 'rsks-nanyang',
-    name: '南阳人事考试网招聘公告 (知仕阁公考)',
+    name: '南阳人事招考公告专栏 (知仕阁)',
     type: 'html',
     enabled: true,
     url: 'https://www.rsks.cn/henan/nanyang/',
@@ -48,12 +104,43 @@ export const SOURCES_CONFIG: SourceConfig[] = [
     },
   },
   {
-    id: 'wx-official-rss',
-    name: '微信公众号「名企校招推送」',
-    type: 'rss',
+    id: 'dengzhou-rsks',
+    name: '邓州市人民政府·招考聘用专栏',
+    type: 'html',
     enabled: true,
-    // 微信公众号转成的 RSS 源（例如通过 RSSHub 或 WeRss 生成的链接）
-    url: 'https://rsshub.app/wechat/officialaccounts/cntvnews', // 示例 RSS 链接，可换成你的公众号 RSS
+    url: 'https://www.rsks.cn/henan/dengzhou/',
+    selector: {
+      container: '.list-content .list-item',
+      title: 'a.list-title',
+      link: 'a.list-title',
+      date: '.list-date',
+    },
+  },
+  {
+    id: 'xichuan-rsks',
+    name: '淅川县人民政府·人事招考专栏',
+    type: 'html',
+    enabled: true,
+    url: 'https://www.rsks.cn/henan/xichuan/',
+    selector: {
+      container: '.list-content .list-item',
+      title: 'a.list-title',
+      link: 'a.list-title',
+      date: '.list-date',
+    },
+  },
+  {
+    id: 'xixia-rsks',
+    name: '西峡县人民政府·人事招考专栏',
+    type: 'html',
+    enabled: true,
+    url: 'https://www.rsks.cn/henan/xixia/',
+    selector: {
+      container: '.list-content .list-item',
+      title: 'a.list-title',
+      link: 'a.list-title',
+      date: '.list-date',
+    },
   },
 ];
 

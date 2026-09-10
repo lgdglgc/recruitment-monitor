@@ -1,6 +1,8 @@
 'use client';
 
-import { FilterConfig, JobItem, SourceConfig } from '@/lib/types';
+import { DEFAULT_FILTER_CONFIG, DEFAULT_TARGET_PREFERENCE } from '@/lib/config';
+import { copyToClipboard, exportJobsToCSV, generateMarkdownReport } from '@/lib/export';
+import { FilterConfig, JobItem, SourceConfig, TargetPreference } from '@/lib/types';
 import { useEffect, useState } from 'react';
 
 export default function Dashboard() {
@@ -8,9 +10,10 @@ export default function Dashboard() {
   const [sources, setSources] = useState<SourceConfig[]>([]);
   const [filter, setFilter] = useState<FilterConfig>({
     years: ['2026', '2027'],
-    keywords: ['校招', '春招', '秋招', '应届', '招聘', '岗位', '实习'],
-    excludeKeywords: ['体检', '拟聘', '拟录用', '结果公示', '递补', '资格复审', '真题', '网校培训', '冲刺班'],
+    keywords: DEFAULT_FILTER_CONFIG.keywords,
+    excludeKeywords: DEFAULT_FILTER_CONFIG.excludeKeywords,
     mode: 'AND',
+    preferences: DEFAULT_TARGET_PREFERENCE,
   });
 
   // Recent jobs state
@@ -21,6 +24,18 @@ export default function Dashboard() {
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 15;
+
+  // View Mode: 'list' (平铺列表) or 'grouped' (按日期归档折叠)
+  const [viewMode, setViewMode] = useState<'list' | 'grouped'>('list');
+  // 意向专属过滤: 只看适合我的岗位
+  const [onlyMatched, setOnlyMatched] = useState<boolean>(false);
+  // 日期归档折叠状态
+  const [collapsedDates, setCollapsedDates] = useState<Record<string, boolean>>({});
+
+  // 偏好标签新增输入项
+  const [prefRegionInput, setPrefRegionInput] = useState<string>('');
+  const [prefRoleInput, setPrefRoleInput] = useState<string>('');
+  const [prefNatureInput, setPrefNatureInput] = useState<string>('');
 
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
@@ -120,17 +135,8 @@ export default function Dashboard() {
         if (data.filter) {
           setFilter({
             ...data.filter,
-            excludeKeywords: data.filter.excludeKeywords || [
-              '体检',
-              '拟聘',
-              '拟录用',
-              '结果公示',
-              '递补',
-              '资格复审',
-              '真题',
-              '网校培训',
-              '冲刺班',
-            ],
+            excludeKeywords: data.filter.excludeKeywords || DEFAULT_FILTER_CONFIG.excludeKeywords,
+            preferences: data.filter.preferences || DEFAULT_TARGET_PREFERENCE,
           });
         }
       }
@@ -421,12 +427,98 @@ export default function Dashboard() {
     }
   })();
 
+  const activePref = filter.preferences || DEFAULT_TARGET_PREFERENCE;
+
+  // 统计全部岗位中命中个人意向的条数
+  const totalMatchedJobsCount = recentJobs.filter((j) => j.matchInfo?.isMatched).length;
+
+  // 导出 CSV 处理函数
+  const handleExportCSV = (itemsToExport?: JobItem[], customFilename?: string) => {
+    const list = itemsToExport || filteredJobs;
+    if (!list || list.length === 0) {
+      showToast('⚠️ 暂无符合条件的招聘数据可供导出');
+      return;
+    }
+    exportJobsToCSV(list, customFilename);
+    showToast(`📥 已成功导出 ${list.length} 条岗位数据为 CSV (Excel / WPS 兼容)`);
+  };
+
+  // 复制 Markdown 简报处理函数
+  const handleCopyMarkdown = async (itemsToReport?: JobItem[], customTitle?: string) => {
+    const list = itemsToReport || filteredJobs;
+    if (!list || list.length === 0) {
+      showToast('⚠️ 暂无符合条件的招聘数据');
+      return;
+    }
+    const md = generateMarkdownReport(list, customTitle);
+    const success = await copyToClipboard(md);
+    if (success) {
+      showToast(`📋 已将 ${list.length} 条岗位简报复制至剪贴板，可直接发送！`);
+    } else {
+      showToast('❌ 复制失败，请手工选中复制');
+    }
+  };
+
+  // 折叠/展开指定日期
+  const toggleDateCollapse = (dateKey: string) => {
+    setCollapsedDates((prev) => ({
+      ...prev,
+      [dateKey]: !prev[dateKey],
+    }));
+  };
+
+  // 添加意向偏好标签 (地区 / 角色 / 编制)
+  const addPrefTag = (category: 'regions' | 'roles' | 'natures', val: string) => {
+    if (!val.trim()) return;
+    const v = val.trim();
+    const currentPref = filter.preferences || DEFAULT_TARGET_PREFERENCE;
+    const currentList = currentPref[category] || [];
+    if (!currentList.includes(v)) {
+      const updatedPref = {
+        ...currentPref,
+        [category]: [...currentList, v],
+      };
+      const updatedFilter = {
+        ...filter,
+        preferences: updatedPref,
+      };
+      setFilter(updatedFilter);
+      saveConfigToBackend(undefined, updatedFilter);
+      showToast(`✅ 已将「${v}」加入关注画像并保存`);
+    }
+    if (category === 'regions') setPrefRegionInput('');
+    if (category === 'roles') setPrefRoleInput('');
+    if (category === 'natures') setPrefNatureInput('');
+  };
+
+  // 移除意向偏好标签
+  const removePrefTag = (category: 'regions' | 'roles' | 'natures', tag: string) => {
+    const currentPref = filter.preferences || DEFAULT_TARGET_PREFERENCE;
+    const currentList = currentPref[category] || [];
+    const updatedPref = {
+      ...currentPref,
+      [category]: currentList.filter((t) => t !== tag),
+    };
+    const updatedFilter = {
+      ...filter,
+      preferences: updatedPref,
+    };
+    setFilter(updatedFilter);
+    saveConfigToBackend(undefined, updatedFilter);
+    showToast(`🗑️ 已从关注画像中移除「${tag}」`);
+  };
+
   const availableDates = Array.from(
     new Set(recentJobs.map((j) => j.crawledDate || j.date || '').filter(Boolean))
   ).sort((a, b) => b.localeCompare(a));
 
   // Filter jobs for Jobs Tab
   const filteredJobs = recentJobs.filter((job) => {
+    // 仅查看适合我的意向岗位
+    if (onlyMatched && !job.matchInfo?.isMatched) {
+      return false;
+    }
+
     const matchQuery =
       !searchQuery.trim() ||
       job.title.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
@@ -437,7 +529,20 @@ export default function Dashboard() {
     return matchQuery && matchSource && matchDate;
   });
 
-  // Pagination for Jobs Tab
+  // 按日期分组归档数据
+  const groupedByDate = availableDates
+    .map((d) => {
+      const itemsForDate = filteredJobs.filter((j) => (j.crawledDate || j.date) === d);
+      const matchedCountForDate = itemsForDate.filter((j) => j.matchInfo?.isMatched).length;
+      return {
+        date: d,
+        items: itemsForDate,
+        matchedCount: matchedCountForDate,
+      };
+    })
+    .filter((g) => g.items.length > 0);
+
+  // Pagination for Jobs Tab (列表视图使用)
   const totalPages = Math.ceil(filteredJobs.length / pageSize) || 1;
   const paginatedJobs = filteredJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
@@ -548,7 +653,7 @@ export default function Dashboard() {
               <div>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 700 }}>📋 最新抓取招聘信息大厅</h2>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  按收录日期每日归档区分已抓取的招聘信息，历史数据持久保存 (最多保留 1000 条)
+                  南阳市直及邓州、淅川、西峡医疗卫生事业编制专属监控，按收录日期每日分类归档
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -558,13 +663,125 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Filter Bar with Date Selector */}
+            {/* 1. 意向画像监控横幅 */}
+            <div className="preference-banner">
+              <div className="preference-banner-header">
+                <div className="preference-banner-title">
+                  <span>🩺</span>
+                  <span>我的专属求职意向监控画像（主治医师 · 邓州/淅川/西峡 · 医疗事业编）</span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                  <button
+                    className={`btn-matched-toggle ${onlyMatched ? 'active' : ''}`}
+                    onClick={() => {
+                      setOnlyMatched(!onlyMatched);
+                      setCurrentPage(1);
+                    }}
+                    title="点击切换：只查看命中意向标签的招聘岗位"
+                  >
+                    {onlyMatched ? '⭐ 正在筛选：只看适合我的岗位' : `🎯 只看适合我的岗位 (${totalMatchedJobsCount}条已匹配)`}
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+                    onClick={() => setActiveTab('filter')}
+                  >
+                    ⚙️ 调整画像
+                  </button>
+                </div>
+              </div>
+              <div className="preference-tags-row">
+                <span style={{ color: '#94a3b8' }}>📍 关注地区：</span>
+                {(activePref.regions || []).map((r) => (
+                  <span key={r} className="pill-tag pill-region">
+                    {r}
+                  </span>
+                ))}
+                <span style={{ color: '#94a3b8', marginLeft: '0.5rem' }}>🩺 岗位专业：</span>
+                {(activePref.roles || []).slice(0, 5).map((role) => (
+                  <span key={role} className="pill-tag pill-role">
+                    {role}
+                  </span>
+                ))}
+                {(activePref.roles || []).length > 5 && (
+                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>+{activePref.roles.length - 5}个</span>
+                )}
+                <span style={{ color: '#94a3b8', marginLeft: '0.5rem' }}>🏛️ 编制性质：</span>
+                {(activePref.natures || []).slice(0, 4).map((n) => (
+                  <span key={n} className="pill-tag pill-nature">
+                    {n}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. 下载导出与视图切换工具条 */}
+            <div className="export-toolbar">
+              <div className="btn-group-actions">
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+                  onClick={() => handleExportCSV()}
+                  title="导出当前界面筛选出的全部招聘数据为 CSV (可用 Excel / WPS 打开)"
+                >
+                  📥 导出当前筛选 ({filteredJobs.length}条 CSV)
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+                  onClick={() => {
+                    const todayJobs = recentJobs.filter((j) => (j.crawledDate || j.date) === todayStr);
+                    handleExportCSV(todayJobs, `南阳医疗招聘_今日新增_${todayStr}.csv`);
+                  }}
+                  title="单独导出今天最新抓取收录的岗位"
+                >
+                  🌟 导出今日新增 CSV
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem', color: '#fde047' }}
+                  onClick={() => {
+                    const matchedList = recentJobs.filter((j) => j.matchInfo?.isMatched);
+                    handleExportCSV(matchedList, `南阳医疗事业编_高匹配岗位_${todayStr}.csv`);
+                  }}
+                  title="仅导出命中主治医师、南阳邓州淅川西峡医疗编制的岗位"
+                >
+                  ⭐ 仅导出高匹配岗位 CSV
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.82rem', padding: '0.35rem 0.75rem' }}
+                  onClick={() => handleCopyMarkdown()}
+                  title="一键复制排版整洁的 Markdown 简报文本，方便发到微信/群/笔记"
+                >
+                  📋 复制 Markdown 简报
+                </button>
+              </div>
+
+              {/* 视图切换：平铺列表 vs 按日归档 */}
+              <div className="view-switcher">
+                <button
+                  className={`view-switch-btn ${viewMode === 'list' ? 'active' : ''}`}
+                  onClick={() => setViewMode('list')}
+                >
+                  📋 详细列表 ({filteredJobs.length})
+                </button>
+                <button
+                  className={`view-switch-btn ${viewMode === 'grouped' ? 'active' : ''}`}
+                  onClick={() => setViewMode('grouped')}
+                >
+                  📅 按日分类归档 ({groupedByDate.length}天)
+                </button>
+              </div>
+            </div>
+
+            {/* 3. 搜索与筛选输入栏 */}
             <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem' }}>
               <div className="filter-bar-grid">
                 <input
                   type="text"
                   className="form-input filter-input"
-                  placeholder="🔍 搜索招聘标题、岗位关键词、专业或摘要..."
+                  placeholder="🔍 搜索标题、邓州/淅川/西峡、主治、专科方向、编制..."
                   value={searchQuery}
                   onChange={(e) => {
                     setSearchQuery(e.target.value);
@@ -608,7 +825,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Jobs List */}
+            {/* 4. 数据展示区 */}
             {jobsLoading ? (
               <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
                 正在加载招聘岗位列表...
@@ -629,106 +846,154 @@ export default function Dashboard() {
                     </button>
                   </div>
                 ) : (
-                  <p style={{ color: 'var(--text-muted)' }}>没有找到匹配搜索条件的招聘岗位。</p>
+                  <div>
+                    <p style={{ color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                      {onlyMatched ? '没有找到符合当前【适合我】意向画像的招聘岗位。' : '没有找到匹配搜索条件的招聘岗位。'}
+                    </p>
+                    {onlyMatched && (
+                      <button className="btn btn-secondary" onClick={() => setOnlyMatched(false)}>
+                        取消「只看适合我」，查看全部岗位
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            ) : (
+            ) : viewMode === 'list' ? (
+              /* A: 平铺详细列表视图 */
               <div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {paginatedJobs.map((item, idx) => (
-                    <div
-                      key={item.id || idx}
-                      className="card"
-                      style={{
-                        padding: '1.25rem',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.65rem',
-                      }}
-                    >
+                  {paginatedJobs.map((item, idx) => {
+                    const isExact = item.matchInfo?.level === 'exact';
+                    const isHigh = item.matchInfo?.level === 'high';
+
+                    return (
                       <div
+                        key={item.id || idx}
+                        className={`card ${isExact ? 'card-exact-match' : isHigh ? 'card-high-match' : ''}`}
                         style={{
+                          padding: '1.25rem',
                           display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'flex-start',
-                          gap: '1rem',
+                          flexDirection: 'column',
+                          gap: '0.65rem',
+                          transition: 'all 0.2s ease',
                         }}
                       >
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noreferrer"
+                        <div
                           style={{
-                            fontSize: '1.05rem',
-                            fontWeight: 700,
-                            color: '#60a5fa',
-                            lineHeight: '1.4',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            gap: '1rem',
                           }}
                         >
-                          {item.title}
-                        </a>
-                        <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
-                          {item.sourceName}
-                        </span>
-                      </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              {isExact && <span className="match-badge-exact">⭐ 极度匹配 (主治/医疗/编制)</span>}
+                              {isHigh && <span className="match-badge-high">🔥 高度匹配</span>}
+                              <a
+                                href={item.link}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  fontSize: '1.05rem',
+                                  fontWeight: 700,
+                                  color: isExact ? '#fef08a' : isHigh ? '#a7f3d0' : '#60a5fa',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                {item.title}
+                              </a>
+                            </div>
 
-                      {/* Date Badges: Distinguish today's newly added items */}
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                        {item.crawledDate === todayStr ? (
-                          <span className="date-badge-today">
-                            <span>🟢</span> 今日新增收录: {item.crawledDate}
+                            {/* 命中标签条 */}
+                            {item.matchInfo &&
+                              (item.matchInfo.matchedRegions.length > 0 ||
+                                item.matchInfo.matchedRoles.length > 0 ||
+                                item.matchInfo.matchedNatures.length > 0) && (
+                                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>🎯 意向命中:</span>
+                                  {item.matchInfo.matchedRegions.map((r) => (
+                                    <span key={r} className="pill-tag pill-region">
+                                      📍 {r}
+                                    </span>
+                                  ))}
+                                  {item.matchInfo.matchedRoles.map((role) => (
+                                    <span key={role} className="pill-tag pill-role">
+                                      🩺 {role}
+                                    </span>
+                                  ))}
+                                  {item.matchInfo.matchedNatures.map((n) => (
+                                    <span key={n} className="pill-tag pill-nature">
+                                      🏛️ {n}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                          </div>
+
+                          <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
+                            {item.sourceName}
                           </span>
-                        ) : item.crawledDate ? (
-                          <span className="date-badge-history">
-                            <span>📅</span> 历史收录: {item.crawledDate}
-                          </span>
-                        ) : null}
-                        {item.date && (
-                          <span
-                            className="date-badge-history"
-                            style={{
-                              background: 'rgba(59, 130, 246, 0.12)',
-                              color: '#93c5fd',
-                              borderColor: 'rgba(59, 130, 246, 0.25)',
-                            }}
-                          >
-                            <span>📰</span> 官方发布日期: {item.date}
-                          </span>
+                        </div>
+
+                        {/* 收录日期与官方发布日期标识 */}
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                          {item.crawledDate === todayStr ? (
+                            <span className="date-badge-today">
+                              <span>🟢</span> 今日新增收录: {item.crawledDate}
+                            </span>
+                          ) : item.crawledDate ? (
+                            <span className="date-badge-history">
+                              <span>📅</span> 历史收录: {item.crawledDate}
+                            </span>
+                          ) : null}
+                          {item.date && (
+                            <span
+                              className="date-badge-history"
+                              style={{
+                                background: 'rgba(59, 130, 246, 0.12)',
+                                color: '#93c5fd',
+                                borderColor: 'rgba(59, 130, 246, 0.25)',
+                              }}
+                            >
+                              <span>📰</span> 官方发布日期: {item.date}
+                            </span>
+                          )}
+                        </div>
+
+                        {item.summary && (
+                          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                            {item.summary}
+                          </p>
                         )}
-                      </div>
 
-                      {item.summary && (
-                        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                          {item.summary}
-                        </p>
-                      )}
-
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginTop: '0.25rem',
-                          fontSize: '0.8rem',
-                          color: '#94a3b8',
-                        }}
-                      >
-                        <span>🔗 数据源: {item.sourceName}</span>
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-secondary"
-                          style={{ fontSize: '0.8rem', padding: '0.25rem 0.65rem' }}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginTop: '0.25rem',
+                            fontSize: '0.8rem',
+                            color: '#94a3b8',
+                          }}
                         >
-                          👉 查看原文 ↗
-                        </a>
+                          <span>🔗 数据源: {item.sourceName}</span>
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.8rem', padding: '0.25rem 0.65rem' }}
+                          >
+                            👉 查看官方公告原文 ↗
+                          </a>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
-                {/* Pagination */}
+                {/* 分页控制器 */}
                 {totalPages > 1 && (
                   <div className="pagination-container">
                     <button
@@ -752,6 +1017,166 @@ export default function Dashboard() {
                     </button>
                   </div>
                 )}
+              </div>
+            ) : (
+              /* B: 按日期归档折叠分组视图 */
+              <div>
+                {groupedByDate.map((group) => {
+                  const isCollapsed = collapsedDates[group.date];
+                  const isToday = group.date === todayStr;
+
+                  return (
+                    <div key={group.date} className="date-group-card">
+                      <div className="date-group-header" onClick={() => toggleDateCollapse(group.date)}>
+                        <div className="date-group-title">
+                          <span>{isToday ? '🌟' : '📅'}</span>
+                          <span>{isToday ? `今日新增收录 (${group.date})` : `收录日期：${group.date}`}</span>
+                          <span
+                            className="type-tag type-rss"
+                            style={{ fontSize: '0.78rem', padding: '0.15rem 0.5rem' }}
+                          >
+                            共 {group.items.length} 条
+                          </span>
+                          {group.matchedCount > 0 && (
+                            <span className="match-badge-exact" style={{ fontSize: '0.75rem' }}>
+                              ⭐ {group.matchedCount} 条符合主治/医疗编制
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="date-group-actions">
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExportCSV(group.items, `南阳医疗招聘_${group.date}.csv`);
+                            }}
+                          >
+                            📥 下载当天 CSV
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyMarkdown(group.items, `🩺 南阳医疗招聘简报 (${group.date})`);
+                            }}
+                          >
+                            📋 复制简报
+                          </button>
+                          <span style={{ fontSize: '0.85rem', color: '#94a3b8', marginLeft: '0.5rem' }}>
+                            {isCollapsed ? '▶ 展开' : '▼ 折叠'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!isCollapsed && (
+                        <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                          {group.items.map((item, idx) => {
+                            const isExact = item.matchInfo?.level === 'exact';
+                            const isHigh = item.matchInfo?.level === 'high';
+
+                            return (
+                              <div
+                                key={item.id || idx}
+                                className={`card ${isExact ? 'card-exact-match' : isHigh ? 'card-high-match' : ''}`}
+                                style={{
+                                  padding: '1rem',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '0.5rem',
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'flex-start',
+                                    gap: '1rem',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                      {isExact && <span className="match-badge-exact">⭐ 极度匹配</span>}
+                                      {isHigh && <span className="match-badge-high">🔥 高度匹配</span>}
+                                      <a
+                                        href={item.link}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        style={{
+                                          fontSize: '1rem',
+                                          fontWeight: 700,
+                                          color: isExact ? '#fef08a' : isHigh ? '#a7f3d0' : '#60a5fa',
+                                        }}
+                                      >
+                                        {item.title}
+                                      </a>
+                                    </div>
+
+                                    {item.matchInfo &&
+                                      (item.matchInfo.matchedRegions.length > 0 ||
+                                        item.matchInfo.matchedRoles.length > 0 ||
+                                        item.matchInfo.matchedNatures.length > 0) && (
+                                        <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                          {item.matchInfo.matchedRegions.map((r) => (
+                                            <span key={r} className="pill-tag pill-region">
+                                              📍 {r}
+                                            </span>
+                                          ))}
+                                          {item.matchInfo.matchedRoles.map((role) => (
+                                            <span key={role} className="pill-tag pill-role">
+                                              🩺 {role}
+                                            </span>
+                                          ))}
+                                          {item.matchInfo.matchedNatures.map((n) => (
+                                            <span key={n} className="pill-tag pill-nature">
+                                              🏛️ {n}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                  </div>
+
+                                  <span className="type-tag type-rss" style={{ flexShrink: 0 }}>
+                                    {item.sourceName}
+                                  </span>
+                                </div>
+
+                                {item.summary && (
+                                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                    {item.summary}
+                                  </p>
+                                )}
+
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    fontSize: '0.78rem',
+                                    color: '#94a3b8',
+                                  }}
+                                >
+                                  <span>{item.date ? `发布时间: ${item.date}` : `收录: ${item.crawledDate}`}</span>
+                                  <a
+                                    href={item.link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.75rem', padding: '0.2rem 0.55rem' }}
+                                  >
+                                    查看原文 ↗
+                                  </a>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -878,10 +1303,116 @@ export default function Dashboard() {
 
         {/* TAB 2: Filter */}
         {activeTab === 'filter' && (
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* 专属求职画像配置卡片 */}
+            <div className="card" style={{ border: '1px solid rgba(234, 179, 8, 0.4)', background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fef08a', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>🩺</span>
+                    <span>我的专属求职意向画像设置（主治医师 · 邓州/淅川/西峡 · 医疗事业编）</span>
+                  </h2>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                    配置后系统将自动为同时命中「地区+医疗岗位+事业编制」的公告打上金牌徽章，并支持在招聘大厅一键【只看适合我】及微信/飞书置顶推送。
+                  </p>
+                </div>
+              </div>
+
+              {/* 1. 关注地区 (Regions) */}
+              <div className="form-group" style={{ marginTop: '1rem' }}>
+                <label className="form-label" style={{ color: '#fdba74' }}>
+                  📍 关注地区 (命中即打上地区标签，默认覆盖南阳及下辖三地)
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="输入地区名称回车添加 (例如: 邓州, 淅川, 西峡, 南阳, 新野)..."
+                    value={prefRegionInput}
+                    onChange={(e) => setPrefRegionInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addPrefTag('regions', prefRegionInput)}
+                  />
+                  <button className="btn btn-secondary" onClick={() => addPrefTag('regions', prefRegionInput)}>
+                    添加地区
+                  </button>
+                </div>
+                <div className="tag-container">
+                  {(filter.preferences?.regions || []).map((r) => (
+                    <span key={r} className="tag" style={{ background: 'rgba(234, 88, 12, 0.25)', color: '#fdba74', borderColor: 'rgba(234, 88, 12, 0.5)' }}>
+                      📍 {r}
+                      <span className="tag-remove" onClick={() => removePrefTag('regions', r)}>
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. 意向岗位与专业 (Roles) */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label className="form-label" style={{ color: '#93c5fd' }}>
+                  🩺 意向岗位 / 科室 / 专业方向 (包含主治医师、临床及各类医学岗位)
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="输入岗位/专业词回车添加 (例如: 主治医师, 内科, 外科, 妇产, 急诊)..."
+                    value={prefRoleInput}
+                    onChange={(e) => setPrefRoleInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addPrefTag('roles', prefRoleInput)}
+                  />
+                  <button className="btn btn-secondary" onClick={() => addPrefTag('roles', prefRoleInput)}>
+                    添加岗位
+                  </button>
+                </div>
+                <div className="tag-container">
+                  {(filter.preferences?.roles || []).map((role) => (
+                    <span key={role} className="tag" style={{ background: 'rgba(59, 130, 246, 0.25)', color: '#93c5fd', borderColor: 'rgba(59, 130, 246, 0.5)' }}>
+                      🩺 {role}
+                      <span className="tag-remove" onClick={() => removePrefTag('roles', role)}>
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. 编制与招考性质 (Natures) */}
+              <div className="form-group" style={{ marginTop: '1.25rem' }}>
+                <label className="form-label" style={{ color: '#d8b4fe' }}>
+                  🏛️ 招考属性 / 事业编制偏好 (事业编制、人才引进、高层次紧缺人才绿色通道)
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="输入编制性质词回车添加 (例如: 事业编, 绿色通道, 人才引进)..."
+                    value={prefNatureInput}
+                    onChange={(e) => setPrefNatureInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addPrefTag('natures', prefNatureInput)}
+                  />
+                  <button className="btn btn-secondary" onClick={() => addPrefTag('natures', prefNatureInput)}>
+                    添加编制词
+                  </button>
+                </div>
+                <div className="tag-container">
+                  {(filter.preferences?.natures || []).map((n) => (
+                    <span key={n} className="tag" style={{ background: 'rgba(168, 85, 247, 0.25)', color: '#d8b4fe', borderColor: 'rgba(168, 85, 247, 0.5)' }}>
+                      🏛️ {n}
+                      <span className="tag-remove" onClick={() => removePrefTag('natures', n)}>
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 常规爬虫抓取关键词配置 */}
             <div className="card">
               <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem' }}>
-                🎯 关键词、年份与黑名单排除规则
+                🎯 通用抓取关键词、年份与黑名单排除规则
               </h2>
 
               {/* Years */}
@@ -915,7 +1446,7 @@ export default function Dashboard() {
               {/* Keywords */}
               <div className="form-group" style={{ marginTop: '1.5rem' }}>
                 <label className="form-label">
-                  招聘目标核心关键词 (标题或摘要包含任意一个即匹配，如: 校招, 春招, 工程师, 招聘)
+                  招聘目标核心关键词 (标题或摘要包含任意一个即进入候选池，如: 招聘, 主治, 医师, 医疗, 卫生, 事业编)
                 </label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
@@ -945,7 +1476,7 @@ export default function Dashboard() {
               {/* Exclude Keywords (Blacklist) */}
               <div className="form-group" style={{ marginTop: '1.5rem' }}>
                 <label className="form-label" style={{ color: '#fca5a5' }}>
-                  🛡️ 排除词黑名单 (命中任意词直接丢弃，过滤体检公告、结果公示、辅导广告等干扰)
+                  🛡️ 排除词黑名单 (命中任意词直接丢弃，过滤体检公告、拟录用公示、培训辅导班广告等干扰)
                 </label>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <input
@@ -993,7 +1524,7 @@ export default function Dashboard() {
                   onClick={() => saveConfigToBackend(undefined, filter)}
                   disabled={saving}
                 >
-                  {saving ? '保存中...' : '💾 保存关键词与排除规则至 Redis'}
+                  {saving ? '保存中...' : '💾 保存全部求职画像与过滤规则至 Redis'}
                 </button>
               </div>
             </div>

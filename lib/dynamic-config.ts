@@ -58,8 +58,9 @@ export async function getFilterConfig(): Promise<FilterConfig> {
         return {
           ...DEFAULT_FILTER_CONFIG,
           ...data,
-          // 兼容历史 Redis 数据无 excludeKeywords 的情况
+          // 兼容历史 Redis 数据无 excludeKeywords 或 preferences 的情况
           excludeKeywords: data.excludeKeywords || DEFAULT_FILTER_CONFIG.excludeKeywords || [],
+          preferences: data.preferences || DEFAULT_FILTER_CONFIG.preferences,
         };
       }
     } catch (err) {
